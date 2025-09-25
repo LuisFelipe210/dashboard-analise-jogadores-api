@@ -100,9 +100,9 @@ pip install -r frontend/requirements.txt
 streamlit run frontend/dashboard.py
 ```
 
-> 🌐 O dashboard abrirá no seu navegador, normalmente em `http://localhost:8501`.
+> O dashboard abrirá no seu navegador, normalmente em `http://localhost:8501`.
 
-## 📊 Como Usar o Dashboard
+## Como Usar o Dashboard
 
 ### **Aba 1: Análise de Desempenho**
 - Visualize métricas do modelo (RMSE, R²)
@@ -116,7 +116,7 @@ streamlit run frontend/dashboard.py
 - Visualize análises detalhadas por jogador
 - Compare perfis individuais com médias do cluster
 
-## 🔧 Resolução de Problemas
+## Resolução de Problemas
 
 ### **Erro: "Arquivo 'jogadores_com_clusters.csv' não encontrado"**
 Execute o script de treinamento primeiro: `python train_model.py`
@@ -134,7 +134,7 @@ O dashboard agora trata automaticamente valores NaN e infinitos. Se o erro persi
 - Verifique se os clusters existem nos dados
 - Recarregue a página se necessário
 
-## 🐳 Comandos Docker Úteis
+## Comandos Docker Úteis
 
 ```bash
 # Ver logs dos contentores
@@ -153,7 +153,7 @@ docker-compose up --build backend
 docker-compose down -v
 ```
 
-## 📋 Dependências Principais
+## Dependências Principais
 
 ### **Backend:**
 - FastAPI
