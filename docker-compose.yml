@@ -1,24 +1,35 @@
 version: '3.8'
 
 services:
-  # Serviço do Backend (API FastAPI)
   backend:
-    build: ./backend
-    container_name: api_backend
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: backend_api
+    environment:
+      - API_KEY=${API_KEY}
     ports:
       - "8000:8000"
     volumes:
-      - ./backend:/app
-    restart: unless-stopped
+      - ./backend:/app/backend
+    networks:
+      - app_network
 
-  # Serviço do Frontend (Dashboard Streamlit)
   frontend:
-    build: ./frontend
-    container_name: streamlit_dashboard
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: frontend_dashboard
+    environment:
+      - API_URL=http://backend:8000/predict # Comunicação via nome do serviço
+      - API_KEY=${API_KEY} # Passa a mesma chave para o frontend
     ports:
       - "8501:8501"
-    volumes:
-      - ./frontend:/app
     depends_on:
       - backend
-    restart: unless-stopped
+    networks:
+      - app_network
+
+networks:
+  app_network:
+    driver: bridge

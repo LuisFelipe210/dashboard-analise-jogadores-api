@@ -1,7 +1,16 @@
-FROM python:3.9-slim
+FROM python:3.13-slim
+
 WORKDIR /app
+
+# Copia primeiro o arquivo de dependências
 COPY requirements.txt .
+
+# Instala as dependências (esta camada será cacheada)
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Copia o resto do código da aplicação
 COPY . .
+
 EXPOSE 8501
-CMD ["streamlit", "run", "dashboard.py", "--server.port=8501", "--server.address=0.0.0.0"]
+
+CMD ["streamlit", "run", "dashboard.py"]

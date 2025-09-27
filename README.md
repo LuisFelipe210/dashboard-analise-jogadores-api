@@ -6,6 +6,8 @@ Este projeto contém uma API de backend (FastAPI) para fazer previsões de machi
 
 ```
 projeto/
+├── .streamlit/
+│   ├── config.toml
 ├── backend/
 │   ├── main.py              # API FastAPI
 │   ├── requirements.txt     # Dependências do backend

@@ -1,0 +1,27 @@
+.env
+venv/
+.venv/
+env/
+.env/
+env.bak/
+venv.bak/
+
+__pycache__/
+*.pyc
+
+backend/model_artifacts/
+frontend/jogadores_com_clusters.csv
+
+JogadoresV1.csv
+
+*.xlsx
+
+.DS_Store
+
+.vscode/
+
+# PyCharm
+.idea/
+
+*.log
+logs/
