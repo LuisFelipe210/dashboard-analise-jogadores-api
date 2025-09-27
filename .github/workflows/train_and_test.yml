@@ -3,7 +3,7 @@ name: CI - Treinamento e Teste do Modelo
 on:
   push:
     branches:
-      - main
+      - main 
     paths:
       - 'train_model.py'
       - 'JogadoresV1.csv'
@@ -20,16 +20,16 @@ jobs:
 
     steps:
       - name: Checkout do Repositório
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Configurar Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.13'
+          python-version: '3.9'
 
       - name: Instalar Dependências de Treinamento
         run: |
-          pip install -r requirements-train.txt # Crie este arquivo
+          pip install -r requirements-train.txt
 
       - name: Executar Script de Treinamento
         run: python train_model.py
@@ -37,13 +37,12 @@ jobs:
       - name: Verificar se os Artefatos Foram Criados
         run: |
           ls -R backend/model_artifacts
-          # Este passo falhará se a pasta ou os arquivos não existirem, validando o treino.
           test -f backend/model_artifacts/lgbm_target1.joblib || exit 1
           test -f backend/model_artifacts/kmeans.joblib || exit 1
           test -f frontend/jogadores_com_clusters.csv || exit 1
 
-      - name: Salvar Artefatos do Modelo (Opcional, mas recomendado)
-        uses: actions/upload-artifact@v3
+      - name: Salvar Artefatos do Modelo
+        uses: actions/upload-artifact@v4
         with:
           name: model-artifacts
           path: backend/model_artifacts/
