@@ -1,205 +1,142 @@
-# Projeto de Dashboard e API de Previsão de Jogadores
+# Dashboard de Análise e Previsão de Jogadores
 
-Este projeto contém uma API de backend (FastAPI) para fazer previsões de machine learning e um frontend interativo (Streamlit) para visualizar dados e interagir com o modelo.
+Este projeto consiste em uma solução completa de Machine Learning, incluindo uma API de backend (FastAPI) para previsões e um dashboard interativo (Streamlit) para análise de dados e interação com os modelos.
 
-## Estrutura do Projeto
+## Arquitetura do Sistema
+
+O sistema é composto por três componentes principais: um script de treinamento, um backend para servir o modelo e um frontend para interação do usuário.
+
+```mermaid
+graph TB
+    subgraph "Fase de Treinamento (Executado 1 vez)"
+        A[Dados Iniciais: JogadoresV1.csv] --> B(train_model.py)
+        B --> C[Artefatos do Modelo Salvos em ./backend/model_artifacts/]
+        B --> D[Dados Enriquecidos: jogadores_com_clusters.csv]
+    end
+
+    subgraph "Aplicação em Produção (Docker)"
+        E[Frontend Streamlit] -- Requisição HTTP com Novos Dados --> F[Backend FastAPI]
+        F -- Carrega Artefatos --> C
+        F -- Realiza Previsão --> G[Previsões JSON]
+        G -- Retorna Previsões --> E
+        D -- Carrega Dados para Análise --> E
+    end
+
+    H[Usuário] -- Interage --> E
+```
+
+## Estrutura de Pastas
 
 ```
-projeto/
-├── .streamlit/
-│   ├── config.toml
+Desafio-final/
 ├── backend/
-│   ├── main.py              # API FastAPI
+│   ├── main.py              # Lógica da API FastAPI
 │   ├── requirements.txt     # Dependências do backend
-│   └── model_artifacts/     # Modelos treinados (gerado após treino)
+│   ├── Dockerfile           # Dockerfile do backend
+│   └── model_artifacts/     # Modelos e artefatos (gerado pelo train_model.py)
 ├── frontend/
-│   ├── dashboard.py         # Interface Streamlit
+│   ├── dashboard.py         # Lógica do Dashboard Streamlit
 │   ├── requirements.txt     # Dependências do frontend
-│   └── jogadores_com_clusters.csv
-├── train_model.py           # Script de treinamento
-├── JogadoresV1.csv         # Dados originais
-├── docker-compose.yml      # Configuração Docker
-├── Dockerfile.backend      # Dockerfile do backend
-├── Dockerfile.frontend     # Dockerfile do frontend
-└── README.md              # Este arquivo
+│   ├── Dockerfile           # Dockerfile do frontend
+│   └── jogadores_com_clusters.csv # Dados para visualização (gerado)
+├── train_model.py           # Script para treinar os modelos
+├── JogadoresV1.csv          # Dados brutos de treinamento
+├── docker-compose.yml       # Orquestrador dos contêineres
+└── README.md                # Este arquivo
 ```
 
 ## Guia de Instalação e Execução
 
-Existem duas formas de executar este projeto: localmente ou com Docker.
+### Pré-requisitos
 
-### Opção 1: Executar com Docker (Recomendado)
+- Docker e Docker Compose instalados
+- O arquivo de dados `JogadoresV1.csv` deve estar na pasta raiz do projeto
 
-Esta é a forma mais simples e consistente de executar a aplicação.
+### Passo 1: Treinamento do Modelo (Apenas uma vez)
 
-#### **Pré-requisitos:**
-- Docker e Docker Compose instalados no seu computador
-- O ficheiro de dados `JogadoresV1.csv` deve estar na pasta raiz do projeto
+Antes de iniciar a aplicação com Docker, é necessário treinar os modelos e gerar os artefatos. Este passo deve ser executado localmente.
 
-#### **Passos:**
+1. **Instale as dependências de treinamento:**
+   ```bash
+   pip install pandas scikit-learn lightgbm joblib numpy
+   ```
 
-**1. Treine o Modelo (Apenas uma vez):**
-Antes de usar o Docker, você precisa gerar os ficheiros dos modelos. Execute este passo localmente.
+2. **Execute o script de treinamento:**
+   ```bash
+   python train_model.py
+   ```
 
-```bash
-# Se ainda não o fez, instale as bibliotecas necessárias
-pip install pandas scikit-learn lightgbm joblib numpy
+> **Importante:** Este comando irá criar a pasta `backend/model_artifacts` com todos os modelos, scalers e configurações necessárias, além do arquivo `frontend/jogadores_com_clusters.csv`.
 
-# Execute o script de treino
-python train_model.py
-```
+### Passo 2: Configuração da Chave de API
 
-> **Importante:** Isto irá criar a pasta `backend/model_artifacts` com os modelos treinados.
-
-**2. Construa e Inicie os Contentores:**
-Na pasta raiz do projeto (onde está o `docker-compose.yml`), execute:
+A API é protegida por uma chave. Crie um arquivo chamado `.env` na raiz do projeto e adicione sua chave:
 
 ```bash
-docker-compose up --build
+# .env
+API_KEY="sua-chave-secreta-aqui"
 ```
 
-> **Nota:** O Docker irá construir as imagens para o backend e o frontend e iniciará ambos os serviços. Pode demorar um pouco na primeira vez.
+### Passo 3: Execução com Docker (Recomendado)
 
-**3. Aceda à Aplicação:**
-- **Dashboard Streamlit:** [http://localhost:8501](http://localhost:8501)
-- **API FastAPI (Documentação):** [http://localhost:8000](http://localhost:8000)
+Com os modelos treinados e a chave de API configurada, inicie a aplicação.
 
-**4. Para Parar a Aplicação:**
-No terminal onde executou o `docker-compose`, pressione `Ctrl + C`. Para remover os contentores:
+1. **Construa e inicie os contêineres:**
+   
+   Na pasta raiz do projeto (onde o arquivo `docker-compose.yml` está localizado), execute:
+   ```bash
+   docker-compose up --build
+   ```
+   
+   O Docker irá construir as imagens para o backend e o frontend e iniciará ambos os serviços. A primeira execução pode levar alguns minutos.
 
-```bash
-docker-compose down
-```
+2. **Acesse a Aplicação:**
+   - **Dashboard Streamlit:** http://localhost:8501
+   - **Documentação da API (Swagger):** http://localhost:8000/docs
 
-### Opção 2: Executar Localmente (Sem Docker)
+3. **Para Parar a Aplicação:**
+   
+   No terminal onde o docker-compose está em execução, pressione `Ctrl + C`. Para remover os contêineres e a rede, execute:
+   ```bash
+   docker-compose down
+   ```
 
-Siga estes passos se não quiser usar o Docker.
+## Funcionalidades do Dashboard
 
-#### **1. Treine o Modelo (Apenas uma vez):**
-Siga o Passo 1 da secção Docker acima.
+### Aba 1: Análise de Desempenho
 
-#### **2. Execute o Backend (API FastAPI):**
+- **Métricas do Modelo:** Visualize o RMSE (Raiz do Erro Quadrático Médio) e o R² (Coeficiente de Determinação) para cada um dos três targets
+- **Gráficos de Dispersão:** Compare os valores reais com os valores previstos pelo modelo para os dados de treino
+- **Filtro por Cluster:** Filtre as análises para visualizar o desempenho do modelo em clusters de jogadores específicos
+- **Distribuição de Clusters:** Entenda a proporção de jogadores em cada um dos quatro perfis identificados
 
-```bash
-# Instale as dependências
-pip install -r backend/requirements.txt
+### Aba 2: Previsão para Novos Jogadores
 
-# Inicie o servidor
-uvicorn backend.main:app --reload
-```
+- **Upload de Arquivo:** Carregue um arquivo Excel (.xlsx) com os dados de novos jogadores para obter previsões
+- **Resultados da Previsão:** Veja uma tabela com o cluster previsto e os valores de Target1, Target2 e Target3 para cada jogador
+- **Análise Individual:** Selecione um jogador para visualizar uma análise detalhada, incluindo um gráfico de radar que compara o perfil do jogador com a média do seu cluster
 
-> 🔗 A API estará disponível em `http://127.0.0.1:8000`. **Deixe este terminal aberto.**
+## Resolução de Problemas Comuns
 
-#### **3. Execute o Frontend (Dashboard Streamlit):**
+### Erro: "Arquivo 'jogadores_com_clusters.csv' não encontrado"
 
-Abra um **novo terminal** e execute:
+- **Causa:** O script de treinamento não foi executado
+- **Solução:** Execute `python train_model.py` na raiz do projeto antes de iniciar a aplicação
 
-```bash
-# Instale as dependências
-pip install -r frontend/requirements.txt
+### Erro no Frontend: "Não foi possível conectar à API"
 
-# Inicie a aplicação
-streamlit run frontend/dashboard.py
-```
+- **Causa:** O contêiner do backend pode não estar em execução ou falhou ao iniciar
+- **Solução:**
+  - Verifique o status dos contêineres com `docker-compose ps`
+  - Verifique os logs do backend com `docker-compose logs backend` para identificar possíveis erros, como a falta dos artefatos do modelo
 
-> O dashboard abrirá no seu navegador, normalmente em `http://localhost:8501`.
+### Erro no Backend: "Chave de API inválida ou ausente" (Código 403)
 
-## Como Usar o Dashboard
-
-### **Aba 1: Análise de Desempenho**
-- Visualize métricas do modelo (RMSE, R²)
-- Compare valores reais vs. previstos
-- Filtre dados por clusters usando a barra lateral
-- Analise a distribuição de jogadores por cluster
-
-### **Aba 2: Previsão para Novos Jogadores**
-- Carregue um arquivo Excel (.xlsx) com novos dados de jogadores
-- Obtenha previsões de Target1, Target2, Target3 e cluster
-- Visualize análises detalhadas por jogador
-- Compare perfis individuais com médias do cluster
-
-## Resolução de Problemas
-
-### **Erro: "Arquivo 'jogadores_com_clusters.csv' não encontrado"**
-Execute o script de treinamento primeiro: `python train_model.py`
-
-### **Erro: "Não foi possível conectar à API"**
-1. Verifique se o backend está em execução
-2. Confirme se está acessível em `http://127.0.0.1:8000`
-3. Se usando Docker, verifique se os contentores estão ativos: `docker-compose ps`
-
-### **Erro: "Out of range float values are not JSON compliant: nan"**
-O dashboard agora trata automaticamente valores NaN e infinitos. Se o erro persistir, verifique se o arquivo Excel não está corrompido.
-
-### **Problemas com Filtros ou Seleção**
-- Certifique-se de que há dados carregados
-- Verifique se os clusters existem nos dados
-- Recarregue a página se necessário
-
-## Comandos Docker Úteis
-
-```bash
-# Ver logs dos contentores
-docker-compose logs
-
-# Ver logs apenas do backend
-docker-compose logs backend
-
-# Ver logs apenas do frontend
-docker-compose logs frontend
-
-# Reconstruir apenas um serviço
-docker-compose up --build backend
-
-# Parar e remover tudo (incluindo volumes)
-docker-compose down -v
-```
+- **Causa:** A chave de API não foi configurada corretamente no arquivo `.env` ou não está sendo enviada pelo frontend
+- **Solução:** Certifique-se de que o arquivo `.env` existe na raiz do projeto e que a variável `API_KEY` está definida. Reinicie os contêineres com `docker-compose up` após criar ou modificar o arquivo
 
 ## Dependências Principais
 
-### **Backend:**
-- FastAPI
-- scikit-learn
-- LightGBM
-- pandas
-- numpy
-- joblib
-
-### **Frontend:**
-- Streamlit
-- plotly
-- pandas
-- scikit-learn
-- requests
-
-## Arquitetura do Sistema
-
-```mermaid
-graph TB
-    A[Dados CSV] --> B[train_model.py]
-    B --> C[Modelos Treinados]
-    C --> D[Backend FastAPI]
-    D --> E[Frontend Streamlit]
-    F[Novos Dados Excel] --> E
-    E --> D
-    D --> G[Previsões JSON]
-    G --> E
-```
-
-## Notas Importantes
-
-- **Primeira execução:** Sempre execute o treinamento do modelo primeiro
-- **Dados de entrada:** Certifique-se de que o arquivo Excel tem as colunas esperadas
-- **Performance:** O Docker pode usar mais recursos, mas oferece maior consistência
-- **Desenvolvimento:** Use a execução local para desenvolvimento ativo com `--reload`
-
-## Suporte
-
-Se encontrar problemas:
-
-1. Verifique se todos os pré-requisitos estão instalados
-2. Confirme que o modelo foi treinado (`backend/model_artifacts` existe)
-3. Verifique os logs dos serviços
-4. Certifique-se de que as portas 8000 e 8501 não estão ocupadas
-
----
+- **Backend:** FastAPI, Uvicorn, Scikit-learn, LightGBM, Pandas, Joblib
+- **Frontend:** Streamlit, Pandas, Plotly, Requests
+- **Treinamento:** Pandas, Scikit-learn, LightGBM, Joblib
