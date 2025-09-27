@@ -1,4 +1,3 @@
-# Desafio-final/backend/main.py
 from fastapi import FastAPI, HTTPException, Security
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
@@ -60,12 +59,8 @@ except FileNotFoundError as e:
 # --- Definição dos Modelos de Dados (Pydantic) ---
 # Modelo para validação de cada jogador individualmente
 class PlayerInput(BaseModel):
-    # Adicione aqui as colunas mais importantes com seus tipos esperados
-    # Exemplo:
     T0101: Optional[float] = Field(None, description="Exemplo de feature numérica")
     T0102: Optional[float] = Field(None, description="Exemplo de outra feature")
-    # Adicione todas as outras colunas esperadas do seu dataset
-    # Deixando como um dicionário genérico por enquanto para flexibilidade
     class Config:
         extra = 'allow' # Permite colunas extras que não foram definidas
 
@@ -87,7 +82,6 @@ def predict(payload: PredictionPayload, api_key: str = Security(get_api_key)):
     """
     logger.info(f"Recebida requisição de previsão para {len(payload.data)} jogadores.")
     try:
-        # Pydantic já validou a estrutura. Agora convertemos para DataFrame.
         # O .dict() foi depreciado, use .model_dump()
         df_new = pd.DataFrame([p.model_dump() for p in payload.data])
 
@@ -97,19 +91,19 @@ def predict(payload: PredictionPayload, api_key: str = Security(get_api_key)):
 
         # 1. Pré-processamento e Imputação
         logger.info("Iniciando pré-processamento...")
-        for col, value in imputation_values.items():
+        for col , value in imputation_values.items():
             if col in df_new.columns:
-                df_new[col].fillna(value, inplace=True)
+                df_new [col] = df_new [col].fillna(value)
 
         # Garantir que não sobrem nulos nas features importantes
-        for col in model_config['features_para_cluster']:
-             if col not in df_new.columns:
-                 df_new[col] = 0 # Adiciona a coluna se estiver faltando
-             df_new[col].fillna(0, inplace=True)
-        for col in model_config['categorical_features']:
-             if col not in df_new.columns:
-                 df_new[col] = 'missing' # Adiciona a coluna se estiver faltando
-             df_new[col].fillna('missing', inplace=True)
+        for col in model_config ['features_para_cluster']:
+            if col not in df_new.columns:
+                df_new [col] = 0  # Adiciona a coluna se estiver faltando
+            df_new [col] = df_new [col].fillna(0)
+        for col in model_config ['categorical_features']:
+            if col not in df_new.columns:
+                df_new [col] = 'missing'  # Adiciona a coluna se estiver faltando
+            df_new [col] = df_new [col].fillna('missing')
 
 
         # 2. Predição do Cluster
