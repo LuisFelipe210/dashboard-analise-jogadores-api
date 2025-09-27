@@ -3,7 +3,7 @@ name: CI - Treinamento e Teste do Modelo
 on:
   push:
     branches:
-      - main 
+      - main
     paths:
       - 'train_model.py'
       - 'JogadoresV1.csv'

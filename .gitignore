@@ -23,10 +23,7 @@ backend/model_artifacts/
 # É um resultado, não um arquivo-fonte.
 frontend/jogadores_com_clusters.csv
 
-# --- Arquivos de Dados (Opcional, mas recomendado) ---
-# Se o seu CSV de dados brutos for muito grande, é uma boa prática não versioná-lo.
-# Se for pequeno (até alguns MB), você pode remover a linha abaixo.
-JogadoresV1.csv
+# --- Arquivos de Dados ---
 
 # Arquivos Excel que podem ser usados para teste de upload
 *.xlsx
