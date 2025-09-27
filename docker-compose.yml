@@ -3,33 +3,40 @@ version: '3.8'
 services:
   backend:
     build:
-      context: .
-      dockerfile: Dockerfile.backend
+      context: ./backend
+      dockerfile: Dockerfile
     container_name: backend_api
     environment:
       - API_KEY=${API_KEY}
     ports:
       - "8000:8000"
     volumes:
-      - ./backend:/app/backend
+      - ./backend:/app
     networks:
       - app_network
 
   frontend:
     build:
-      context: .
-      dockerfile: Dockerfile.frontend
+      context: ./frontend
+      dockerfile: Dockerfile
     container_name: frontend_dashboard
     environment:
-      - API_URL=http://backend:8000/predict # Comunicação via nome do serviço
-      - API_KEY=${API_KEY} # Passa a mesma chave para o frontend
+      - API_URL=http://backend:8000/predict
+      - API_KEY=${API_KEY}
     ports:
       - "8501:8501"
+    volumes:
+      - ./frontend:/app
     depends_on:
       - backend
     networks:
       - app_network
+    command: >
+      sh -c "mkdir -p /app/.streamlit && 
+             echo 'API_KEY = \"'$$API_KEY'\"' > /app/.streamlit/secrets.toml && 
+             streamlit run /app/dashboard.py"
 
 networks:
   app_network:
     driver: bridge
+
