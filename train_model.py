@@ -53,7 +53,7 @@ features_para_cluster = df.select_dtypes(include=np.number).drop(columns=['Targe
 scaler = StandardScaler()
 features_scaled = scaler.fit_transform(features_para_cluster)
 
-kmeans = KMeans(n_clusters=4 , random_state=42 , n_init='auto')
+kmeans = KMeans(n_clusters=3 , random_state=42 , n_init='auto')
 df ['cluster'] = kmeans.fit_predict(features_scaled)
 
 perfil_clusters = df.groupby('cluster')[features_para_cluster.columns].mean().round(2)
