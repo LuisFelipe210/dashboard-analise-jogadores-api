@@ -20,6 +20,7 @@ services:
     environment:
       # Dentro da rede do Docker, use o nome do serviço (backend), não localhost
       - VITE_API_URL=http://backend:8000
+      - VITE_API_KEY=${API_KEY} # <--- ADICIONE ESTA LINHA
       - CHOKIDAR_USEPOLLING=true
     ports:
       - "5173:5173"        # Vite (não 8501)
@@ -30,7 +31,6 @@ services:
       - backend
     networks:
       - app_network
-
 networks:
   app_network:
     driver: bridge
