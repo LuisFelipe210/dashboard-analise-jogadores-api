@@ -3,14 +3,16 @@ services:
     build:
       context: ./backend
     container_name: backend_api
-    environment:
-      - API_KEY=${API_KEY}
+    env_file:
+      - .env
     ports:
       - "8000:8000"
     volumes:
       - ./backend:/app
     networks:
       - app_network
+    # O comando foi movido para o Dockerfile para mais clareza
+    # mas poderia ser aqui também: command: ["flask", "run", "--host=0.0.0.0", "--port=8000"]
 
   frontend:
     build:
@@ -18,11 +20,12 @@ services:
       dockerfile: Dockerfile
     container_name: react-frontend
     environment:
-      # Dentro da rede do Docker, use o nome do serviço (backend), não localhost
+      # O frontend acessa o backend pelo nome do serviço na rede Docker
       - VITE_API_URL=http://backend:8000
+      - VITE_API_KEY=${API_KEY} # Passando a chave para o frontend
       - CHOKIDAR_USEPOLLING=true
     ports:
-      - "5173:5173"        # Vite (não 8501)
+      - "5173:5173"
     volumes:
       - ./dashboard-react-frontend:/app
       - /app/node_modules

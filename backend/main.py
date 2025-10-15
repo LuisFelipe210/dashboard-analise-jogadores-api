@@ -1,404 +1,196 @@
-# backend/main.py
-from __future__ import annotations
-
-import os
-import json
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
-
-import numpy as np
+# backend/main.py - VERSÃO FINAL E CORRIGIDA (Flask adaptado para compatibilidade)
 import pandas as pd
+import numpy as np
 import joblib
-from fastapi import FastAPI, Body, Header, HTTPException, Query
-from fastapi.middleware.cors import CORSMiddleware
+from flask import Flask, request, jsonify, make_response
+from flask_cors import CORS
+import os
+from sklearn.impute import SimpleImputer
+import json
 
-# -------------------------------------------------------------------
-# Configuração básica
-# -------------------------------------------------------------------
-BASE_DIR = Path(__file__).parent
-ARTIFACTS_DIR = BASE_DIR / "model_artifacts"
+# --- 1. Inicializar o aplicativo Flask ---
+app = Flask(__name__)
+CORS(app)  # Permite requisições de outras origens
 
-API_KEY = os.getenv("API_KEY", "")  # defina no ambiente: $env:API_KEY="sua-chave" (Windows PowerShell)
+# --- 2. Carregar os artefatos na inicialização ---
+ARTIFACTS_DIR = 'artifacts'
+column_info, selected_features_by_target = {}, {}
 
-# CORS liberado para desenvolvimento
-app = FastAPI(title="Jogadores API", version="1.0.0")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*", "X-API-Key", "X-API-KEY"],
-)
+try:
+    # Modelos
+    model_t1 = joblib.load(os.path.join(ARTIFACTS_DIR, 'best_model_Target1.joblib'))
+    model_t2 = joblib.load(os.path.join(ARTIFACTS_DIR, 'best_model_Target2.joblib'))
+    model_t3 = joblib.load(os.path.join(ARTIFACTS_DIR, 'best_model_Target3.joblib'))
 
-# -------------------------------------------------------------------
-# Carregamento de artefatos
-# -------------------------------------------------------------------
-def _load_json(path: Path) -> Any:
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+    # Pré-processadores
+    numeric_imputer = joblib.load(os.path.join(ARTIFACTS_DIR, 'numeric_imputer.joblib'))
+    categorical_imputer = joblib.load(os.path.join(ARTIFACTS_DIR, 'categorical_imputer.joblib'))
+    scaler = joblib.load(os.path.join(ARTIFACTS_DIR, 'scaler.joblib'))
+    encoder_ohe = joblib.load(os.path.join(ARTIFACTS_DIR, 'encoder_ohe.joblib'))
 
-def _safe_joblib_load(path: Path):
-    if not path.exists():
-        return None
-    return joblib.load(path)
+    # Metadados de colunas
+    column_info = joblib.load(os.path.join(ARTIFACTS_DIR, 'column_info.joblib'))
+    selected_features_by_target = joblib.load(os.path.join(ARTIFACTS_DIR, 'selected_features_by_target.joblib'))
 
-# Modelos de regressão
-MODEL_T1 = _safe_joblib_load(ARTIFACTS_DIR / "stacking_model_target1.joblib")
-MODEL_T2 = _safe_joblib_load(ARTIFACTS_DIR / "stacking_model_target2.joblib")
-MODEL_T3 = _safe_joblib_load(ARTIFACTS_DIR / "stacking_model_target3.joblib")
+    print("Todos os artefatos foram carregados com sucesso.")
+except FileNotFoundError as e:
+    print(f"AVISO: Arquivo de artefato não encontrado: {e}. A API pode não funcionar corretamente.")
+except Exception as e:
+    print(f"ERRO GERAL ao carregar artefatos: {e}")
 
-# Pipeline de cluster
-CLUSTER_PIPE = _safe_joblib_load(ARTIFACTS_DIR / "cluster_pipeline.joblib")
 
-# Config do treino
-MODEL_CONFIG: Dict[str, Any] = {}
-config_path = ARTIFACTS_DIR / "model_config.json"
-if config_path.exists():
-    MODEL_CONFIG = _load_json(config_path)
+# --- 3. Função de Pré-processamento para Novos Dados ---
+def preprocess_new_data(df: pd.DataFrame) -> pd.DataFrame:
+    """Aplica todas as etapas de pré-processamento do notebook em novos dados."""
+    
+    df_copy = df.copy()
 
-EXPECTED: List[str] = []
-expected_path = ARTIFACTS_DIR / "expected_features.json"
-if expected_path.exists():
-    EXPECTED = _load_json(expected_path)
-else:
-    # fallback para compatibilidade: tentar pegar das colunas finais salvas no config
-    EXPECTED = MODEL_CONFIG.get("final_model_columns", [])
+    # a. Limpeza inicial
+    df_copy.drop(columns=column_info.get('unwanted_columns', []), errors='ignore', inplace=True)
+    df_copy.replace("N/A", np.nan, inplace=True)
+    
+    # b. Identificar colunas
+    all_numeric_cols = column_info.get('numerical_feature_columns', [])
+    all_categorical_cols = column_info.get('categorical_manual', [])
+    
+    for col in all_numeric_cols + all_categorical_cols:
+        if col not in df_copy.columns:
+            df_copy[col] = np.nan
 
-NUM_FOR_CLUSTER: List[str] = MODEL_CONFIG.get("numerical_features_for_clustering", [])
-CATEGORICAL_FEATURES: List[str] = MODEL_CONFIG.get("categorical_features", [])  # pode não ser usado
+    # c. Imputação
+    df_copy[all_numeric_cols] = numeric_imputer.transform(df_copy[all_numeric_cols])
+    df_copy[all_categorical_cols] = categorical_imputer.transform(df_copy[all_categorical_cols])
 
-# perfil de clusters (opcional)
-PERFIL_CLUSTERS_CSV = ARTIFACTS_DIR / "perfil_clusters.csv"
-PERFIL_CLUSTERS_DF = None
-if PERFIL_CLUSTERS_CSV.exists():
-    try:
-        PERFIL_CLUSTERS_DF = pd.read_csv(PERFIL_CLUSTERS_CSV)
-    except Exception:
-        PERFIL_CLUSTERS_DF = None
+    # d. Tratamento de valores fora do intervalo
+    valid_ranges = column_info.get('valid_ranges', {})
+    for column, value_range in valid_ranges.items():
+        if column in df_copy.columns:
+            lower, upper = value_range
+            df_copy[column] = pd.to_numeric(df_copy[column], errors='coerce')
+            out_of_range_mask = (df_copy[column] < lower) | (df_copy[column] > upper)
+            if out_of_range_mask.any():
+                df_copy.loc[out_of_range_mask, column] = np.nan
+                imputer_temp = SimpleImputer(strategy='most_frequent')
+                df_copy[[column]] = imputer_temp.fit_transform(df_copy[[column]])
+    
+    # e. Tratamento de negativos
+    for column in all_categorical_cols + all_numeric_cols:
+        col_num = pd.to_numeric(df_copy[column], errors='coerce')
+        neg_mask = (col_num < 0).fillna(False)
+        if neg_mask.any():
+            if column in all_numeric_cols:
+                median_val = pd.to_numeric(df_copy[column][col_num >= 0]).median()
+                df_copy.loc[neg_mask, column] = median_val if not pd.isna(median_val) else 0
+            else:
+                df_copy.loc[neg_mask, column] = np.nan
+                imputer_temp = SimpleImputer(strategy='most_frequent')
+                df_copy[[column]] = imputer_temp.fit_transform(df_copy[[column]])
+    
+    # f. Scaling
+    df_num_scaled = pd.DataFrame(scaler.transform(df_copy[all_numeric_cols]), columns=all_numeric_cols, index=df_copy.index)
 
-# -------------------------------------------------------------------
-# Utilidades de coerção / preparação
-# -------------------------------------------------------------------
-def _coerce_numeric(val: Any) -> float:
-    """
-    Converte strings numéricas de forma robusta,
-    trocando vírgula por ponto e tratando lixo comum.
-    """
-    if val is None:
-        return 0.0
-    if isinstance(val, (int, float, np.number)):
-        if pd.isna(val):
-            return 0.0
-        return float(val)
-    s = str(val).strip().replace('"', '')
-    if s == "" or s.lower() in {"nan", "none", "null"}:
-        return 0.0
-    # tentativa simples de normalização de separador decimal
-    try:
-        # se tiver uma vírgula e mais de um ponto, troca pontos de milhar
-        if s.count(",") == 1 and s.count(".") > 1:
-            s = s.replace(".", "").replace(",", ".")
-        else:
-            s = s.replace(",", ".")
-        return float(s)
-    except Exception:
-        return 0.0
+    # g. One-Hot Encoding
+    categorical_to_encode = column_info.get('categorical_features_ohe', [])
+    df_cat_encoded = pd.DataFrame(
+        encoder_ohe.transform(df_copy[categorical_to_encode]),
+        columns=encoder_ohe.get_feature_names_out(categorical_to_encode),
+        index=df_copy.index
+    )
 
-def _rows_to_dataframe(rows: List[Dict[str, Any]]) -> pd.DataFrame:
-    """
-    Recebe uma lista de dicionários e devolve um DataFrame com:
-    - colunas padronizadas para EXPECTED
-    - ordem de colunas == EXPECTED
-    - numéricos coeridos (todas as colunas de EXPECTED são numéricas no modelo final)
-    """
-    if not isinstance(rows, list) or not rows:
-        return pd.DataFrame(columns=EXPECTED)
+    # h. Manter outras categóricas
+    categorical_to_keep = [col for col in all_categorical_cols if col not in categorical_to_encode]
+    df_cat_keep = df_copy[categorical_to_keep]
 
-    out = []
-    for r in rows:
-        dst = {}
-        for col in EXPECTED:
-            val = r.get(col, 0)
-            dst[col] = _coerce_numeric(val)
-        out.append(dst)
+    # i. Combinar
+    df_processed = pd.concat([df_num_scaled, df_cat_keep, df_cat_encoded], axis=1)
 
-    df = pd.DataFrame(out, columns=EXPECTED)
-    # garante tipos numéricos (evita dtype=object)
-    for c in df.columns:
-        if df[c].dtype == "bool":
-            df[c] = df[c].astype(int)
-        elif not np.issubdtype(df[c].dtype, np.number):
-            df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0.0)
-        else:
-            df[c] = df[c].astype(float)
-    return df
+    return df_processed
 
-def _predict_targets(dfX: pd.DataFrame) -> Dict[str, List[Optional[float]]]:
-    preds = {"target1": [], "target2": [], "target3": []}
-    if MODEL_T1 is None or MODEL_T2 is None or MODEL_T3 is None:
-        # artefatos ausentes
-        return preds
 
-    X = dfX.copy()
-    # garante ordem e colunas
-    missing = [c for c in EXPECTED if c not in X.columns]
-    for m in missing:
-        X[m] = 0.0
-    X = X[EXPECTED]
+# --- 4. Endpoints de Compatibilidade (Mocks) ---
+@app.route('/predict/schema', methods=['GET'])
+def predict_schema():
+    if not column_info:
+        return jsonify({"error": "Metadados de colunas não carregados."}), 500
+    expected_cols = column_info.get('numerical_feature_columns', []) + column_info.get('categorical_manual', [])
+    schema = [{'name': col, 'type': 'number', 'label': col, 'default': 0} for col in expected_cols]
+    return jsonify(schema)
 
-    # predições
-    try:
-        p1 = MODEL_T1.predict(X).tolist()
-    except Exception:
-        p1 = [None] * len(X)
-    try:
-        p2 = MODEL_T2.predict(X).tolist()
-    except Exception:
-        p2 = [None] * len(X)
-    try:
-        p3 = MODEL_T3.predict(X).tolist()
-    except Exception:
-        p3 = [None] * len(X)
+@app.route('/clusters/profile', methods=['GET'])
+def clusters_profile():
+    return jsonify({
+        "clusters": [], "n_features": 0, "means": {}, "top_diffs": [], "used_features": [],
+    })
 
-    preds["target1"] = p1
-    preds["target2"] = p2
-    preds["target3"] = p3
-    return preds
+@app.route('/overview', methods=['GET'])
+def overview():
+    num_cols = len(column_info.get('numerical_feature_columns', []))
+    cat_cols = len(column_info.get('categorical_manual', []))
+    return jsonify({"n_expected_features": num_cols + cat_cols, "has_cluster_pipeline": False})
+    
+@app.route('/feature_importance', methods=['GET'])
+def feature_importance():
+    return jsonify({"available": False, "note": "O modelo atual não expõe importâncias de features."})
 
-def _predict_cluster(raw_rows: List[Dict[str, Any]]) -> Optional[List[int]]:
-    """
-    Prediz cluster usando CLUSTER_PIPE com as features numéricas do treino (NUM_FOR_CLUSTER).
-    Se não houver pipeline ou colunas, retorna None.
-    """
-    if CLUSTER_PIPE is None or not NUM_FOR_CLUSTER:
-        return None
+@app.route('/health', methods=['GET'])
+def health():
+    return jsonify({"status": "ok"})
 
-    out = []
-    for r in raw_rows:
-        d = {}
-        for c in NUM_FOR_CLUSTER:
-            d[c] = _coerce_numeric(r.get(c, 0))
-        out.append(d)
-    df = pd.DataFrame(out, columns=NUM_FOR_CLUSTER)
-    if df.empty:
-        return None
-
-    try:
-        labels = CLUSTER_PIPE.predict(df).tolist()
-        return labels
-    except Exception:
-        return None
-
-def _inject_cluster_ohe(dfX: pd.DataFrame, clusters: Optional[List[int]]) -> pd.DataFrame:
-    """
-    Se o treinamento criou dummies de cluster (ex.: Cluster_0, Cluster_1),
-    injeta as colunas correspondentes com base na predição de cluster.
-    """
-    # quais colunas de cluster eram esperadas no treino?
-    expected_cluster_cols = [col for col in EXPECTED if col.startswith("Cluster_")]
-
-    if not expected_cluster_cols:
-        # treino não usou dummies de cluster; nada a fazer
-        return dfX
-
-    if clusters is None:
-        # sem predição de cluster: apenas garanta colunas com zeros
-        for c in expected_cluster_cols:
-            if c not in dfX.columns:
-                dfX[c] = 0
-        return dfX
-
-    # gera dummies a partir dos rótulos previstos
-    cluster_series = pd.Series(clusters, name="cluster")
-    dummies = pd.get_dummies(cluster_series, prefix="Cluster")
-
-    # garanta que todas as colunas esperadas existam; se faltar, cria com 0
-    for col in expected_cluster_cols:
-        if col not in dummies.columns:
-            dummies[col] = 0
-
-    # mantenha apenas as colunas esperadas e alinhe índices
-    dummies = dummies[expected_cluster_cols]
-    dummies.index = dfX.index
-
-    # injete no dataframe base (não sobrescreva colunas já existentes)
-    for col in expected_cluster_cols:
-        if col not in dfX.columns:
-            dfX[col] = dummies[col].astype(int)
-
-    return dfX
-
-# -------------------------------------------------------------------
-# Endpoints
-# -------------------------------------------------------------------
-@app.get("/health")
-async def health():
-    return {"status": "ok"}
-
-@app.get("/predict/schema")
-async def predict_schema():
-    """
-    Retorna um ARRAY de objetos para montar o formulário do frontend:
-      [{ name, type, label, default }]
-    Todas as colunas de EXPECTED são numéricas no modelo final -> type="number", default=0.
-    """
-    fields = []
-    for col in EXPECTED:
-        fields.append({"name": col, "type": "number", "label": col, "default": 0})
-    return fields
-
-@app.post("/predict")
-async def predict_endpoint(
-    payload: Any = Body(...),
-    x_api_key_1: Optional[str] = Header(None, alias="X-API-Key"),
-    x_api_key_2: Optional[str] = Header(None, alias="X-API-KEY"),
-):
-    # auth (tolerante a ambos cabeçalhos)
-    given_key = x_api_key_1 or x_api_key_2 or ""
+# --- 5. Endpoint de Predição Principal ---
+@app.route('/predict', methods=['POST'])
+def predict():
+    API_KEY = os.getenv("API_KEY", "")
+    given_key = request.headers.get("X-API-Key") or request.headers.get("X-API-KEY")
     if API_KEY and given_key != API_KEY:
-        raise HTTPException(status_code=401, detail="Invalid API key")
+        return jsonify({'error': 'Chave de API inválida'}), 401
 
-    # aceita tanto uma lista "crua" quanto { "data": [...] }
-    rows: Union[List[Dict[str, Any]], None] = None
-    if isinstance(payload, dict) and "data" in payload:
-        rows = payload["data"]
-    elif isinstance(payload, list):
-        rows = payload
+    json_data = request.get_json()
+    if isinstance(json_data, dict) and 'data' in json_data:
+        json_data = json_data['data']
 
-    if not isinstance(rows, list) or not rows:
-        raise HTTPException(status_code=422, detail="O corpo deve ser uma lista de objetos ou {data: [...]}.")
+    if not isinstance(json_data, list):
+        return jsonify({'error': 'O corpo da requisição deve ser uma lista de objetos.'}), 400
 
-    # 1) Predição de cluster (antes de montar DF final) — usa NUM_FOR_CLUSTER
-    cluster_labels = _predict_cluster(rows)
+    try:
+        df_raw = pd.DataFrame(json_data)
+        if df_raw.empty:
+            return jsonify({'error': 'Nenhum dado válido para processar.'}), 400
+    except Exception as e:
+        return jsonify({'error': f'Erro ao converter JSON para DataFrame: {e}'}), 400
+        
+    try:
+        df_processed = preprocess_new_data(df_raw)
+    except Exception as e:
+        return jsonify({'error': f'Erro durante o pré-processamento: {e}'}), 500
 
-    # 2) Monta DF padronizado nas EXPECTED
-    dfX = _rows_to_dataframe(rows)
+    predictions = {}
+    try:
+        for target_name_api, model in [('Target1', model_t1), ('Target2', model_t2), ('Target3', model_t3)]:
+            features_for_target = selected_features_by_target[target_name_api]
+            
+            missing_cols = set(features_for_target) - set(df_processed.columns)
+            if missing_cols:
+                for c in missing_cols: df_processed[c] = 0
+            
+            df_for_prediction = df_processed[features_for_target]
+            predictions[target_name_api] = model.predict(df_for_prediction).tolist()
 
-    # 3) Injeta dummies de cluster se o treino gerou Cluster_*
-    dfX = _inject_cluster_ohe(dfX, cluster_labels)
-
-    # 4) Garante ordem final exata
-    missing = [c for c in EXPECTED if c not in dfX.columns]
-    for m in missing:
-        dfX[m] = 0
-    dfX = dfX[EXPECTED]
-
-    # 5) Predições
-    preds = _predict_targets(dfX)
-
-    return {
+    except Exception as e:
+         return jsonify({'error': f'Erro durante a predição: {e}'}), 500
+    
+    # ADAPTAÇÃO: Formatar a resposta para o frontend React
+    n_rows = len(df_raw)
+    response_data = {
         "predictions": {
-            "target1": preds["target1"],
-            "target2": preds["target2"],
-            "target3": preds["target3"],
-            "cluster": cluster_labels,
-        },
-        "count": len(rows),
+            "target1": predictions.get('Target1', [None] * n_rows),
+            "target2": predictions.get('Target2', [None] * n_rows),
+            "target3": predictions.get('Target3', [None] * n_rows),
+            "cluster": [None] * n_rows  # O novo modelo não gera clusters
+        }
     }
+    return jsonify(response_data)
 
-# --- NOVO ENDPOINT: perfil de clusters ---------------------------------------
-@app.get("/clusters/profile")
-async def clusters_profile(limit: int = Query(5, ge=1, le=30)):
-    """
-    Devolve perfis médios por cluster (com base em backend/model_artifacts/perfil_clusters.csv)
-    e as TOP diferenças absolutas entre clusters.
-
-    Retorno:
-    {
-      "clusters": [0,1],
-      "n_features": 123,
-      "means": { "0": {"featA": 1.2, ...}, "1": {...} },
-      "top_diffs": [
-         {"feature": "featX", "diff_abs": 12.3, "by_cluster": {"0": 9.1, "1": 21.4}},
-         ...
-      ],
-      "used_features": ["featX","featY",...],     # features usadas no radar (top 'limit')
-    }
-    """
-    if PERFIL_CLUSTERS_DF is None or PERFIL_CLUSTERS_DF.empty:
-        raise HTTPException(status_code=404, detail="perfil_clusters.csv não encontrado ou vazio.")
-
-    # Faz uma cópia defensiva
-    df = PERFIL_CLUSTERS_DF.copy()
-
-    # Tenta configurar o índice como 'cluster'
-    if "cluster" in df.columns:
-        df = df.set_index("cluster")
-    else:
-        # Se foi salvo com índice sem nome, a primeira coluna costuma ser o índice
-        first_col = df.columns[0]
-        # Heurística: se a primeira coluna for de inteiros 0/1, assuma que é o índice
-        if pd.api.types.is_integer_dtype(df[first_col]) and set(df[first_col].unique()).issubset({0, 1}):
-            df = df.set_index(first_col)
-        # Se nada disso der certo, seguimos assim mesmo (clusters serão 0..N-1)
-        # e torcemos para a importação já ter vindo com índice ok.
-
-    # Mantém apenas numéricas
-    df = df.select_dtypes(include=[np.number])
-
-    if df.empty or df.shape[0] < 1:
-        raise HTTPException(status_code=400, detail="Perfil de clusters sem colunas numéricas.")
-
-    # Lista dos clusters (índice)
-    clusters_idx = [int(i) for i in df.index.tolist()]
-    # Médias por cluster (já são as médias)
-    means = {str(int(i)): {str(c): float(df.loc[i, c]) for c in df.columns} for i in df.index}
-
-    # Diferenças absolutas entre clusters (para k>2 usamos (max-min) por coluna)
-    diffs = []
-    for col in df.columns:
-        col_vals = df[col].to_dict()  # chave: cluster idx
-        # diff absoluto entre maior e menor média daquele feature
-        max_v = float(np.nanmax(list(col_vals.values())))
-        min_v = float(np.nanmin(list(col_vals.values())))
-        diff_abs = abs(max_v - min_v)
-        diffs.append({
-            "feature": str(col),
-            "diff_abs": float(diff_abs),
-            "by_cluster": {str(int(k)): float(v) for k, v in col_vals.items()}
-        })
-
-    # Ordena por diferença e pega top 'limit'
-    diffs.sort(key=lambda x: x["diff_abs"], reverse=True)
-    top_diffs = diffs[:limit]
-    used_features = [d["feature"] for d in top_diffs]
-
-    return {
-        "clusters": clusters_idx,
-        "n_features": int(df.shape[1]),
-        "means": means,
-        "top_diffs": top_diffs,
-        "used_features": used_features,
-    }
-
-
-@app.get("/feature_importance")
-async def feature_importance():
-    """
-    Retorna importâncias se o modelo as expõe.
-    Como temos um StackingRegressor, é comum não termos importâncias globais.
-    Devolvemos um fallback simples com as N primeiras colunas, apenas para UI.
-    """
-    top = EXPECTED[:20]
-    return {
-        "available": False,
-        "note": "StackingRegressor não expõe importâncias diretas; exibindo colunas principais como fallback.",
-        "top_features": top,
-    }
-
-@app.get("/overview")
-async def overview():
-    """
-    Estatísticas de alto nível para cards / gráficos.
-    Se houver perfil de clusters, retorna agregados simples.
-    """
-    result = {
-        "n_expected_features": len(EXPECTED),
-        "has_cluster_pipeline": CLUSTER_PIPE is not None,
-        "numerical_for_cluster": len(NUM_FOR_CLUSTER),
-        "categorical_features": len(MODEL_CONFIG.get("categorical_features", [])),
-    }
-    if PERFIL_CLUSTERS_DF is not None and "cluster" in PERFIL_CLUSTERS_DF.columns:
-        counts = PERFIL_CLUSTERS_DF["cluster"].value_counts().to_dict()
-        result["cluster_counts"] = {str(k): int(v) for k, v in counts.items()}
-    return result
+# --- 6. Executar o Servidor ---
+if __name__ == '__main__':
+    # O comando do Docker Compose irá sobrescrever host e port
+    app.run(host='0.0.0.0', port=8000, debug=True)
