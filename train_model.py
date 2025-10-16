@@ -1,168 +1,299 @@
-# /train_model.py
-
+# train_model.py
+import os
+import json
+import warnings
 import pandas as pd
 import numpy as np
 import joblib
-import json
-import os
-import warnings
+import matplotlib.pyplot as plt
+from pathlib import Path
 
-# Modelos e Ferramentas de Pré-processamento do Scikit-learn
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-from sklearn.pipeline import Pipeline
+from sklearn.model_selection import train_test_split , KFold , cross_val_score  # <--- CORREÇÃO AQUI
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import StandardScaler , OneHotEncoder , LabelEncoder
 from sklearn.cluster import KMeans
+from sklearn.metrics import silhouette_score , mean_squared_error
 from sklearn.decomposition import PCA
-from sklearn.linear_model import RidgeCV, Lasso
-from sklearn.ensemble import StackingRegressor, RandomForestRegressor
-from sklearn.base import clone
+from sklearn.ensemble import RandomForestRegressor , ExtraTreesRegressor , GradientBoostingRegressor , \
+    HistGradientBoostingRegressor , StackingRegressor
+from sklearn.tree import DecisionTreeRegressor
+from xgboost import XGBRegressor
+import pandas.api.types as pdt
 
-warnings.filterwarnings('ignore', category=FutureWarning)
-warnings.filterwarnings('ignore', category=UserWarning)
+warnings.filterwarnings('ignore' , category=FutureWarning)
+warnings.filterwarnings('ignore' , category=UserWarning)
 
-print("Iniciando o processo de treinamento (com divisão Treino-Validação-Teste)...")
+# ===================================================================
+# CONFIGURAÇÕES
+# ===================================================================
+DATA_FILE = "JogadoresV1.csv"
+ARTIFACTS_DIR = Path("backend/artifacts")
+PUBLIC_DIR = Path("dashboard-react-frontend/public")
+ARTIFACTS_DIR.mkdir(parents=True , exist_ok=True)
+PUBLIC_DIR.mkdir(parents=True , exist_ok=True)
 
-# --- 1. Carregamento e Pré-processamento ---
-print("1. Carregando e processando dados...")
-df = pd.read_csv('JogadoresV1.csv', encoding='utf-8', na_values=['N/A', '', '#DIV/0!'])
-df_processed = df.copy()
-cod_acesso = df_processed['Código de Acesso'].copy()
-df_processed.columns = df_processed.columns.str.strip().str.replace(' ', '_', regex=False).str.replace('[^a-zA-Z0-9_]', '', regex=True)
+RANDOM_STATE = 42
+CV_FOLDS = 5
+N_JOBS = -1
 
-def force_clean_and_convert_string(series):
-    series = series.astype(str).str.replace('"', '', regex=False).str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
-    series = series.replace(['-1.0', 'nan', 'N/A', 'NaN'], np.nan)
-    return pd.to_numeric(series, errors='coerce')
+print("--- INICIANDO PROCESSO DE TREINAMENTO E GERAÇÃO DE ARTEFATOS ---")
 
-object_cols = df_processed.select_dtypes(include='object').columns
-cols_to_exclude_conv = ['Cdigo_de_Acesso'] + [col for col in object_cols if col.startswith('Cor') or col.startswith('F0207')]
-for col in object_cols:
-    if col not in cols_to_exclude_conv:
-        df_processed[col] = force_clean_and_convert_string(df_processed[col])
 
-cols_to_drop = ['T1205Expl', 'T1199Expl', 'F0299__Explicao_Tempo', 'TempoTotalExpl', 'PTempoTotalExpl', 'T1210Expl', 'T0499__Explicao_Tempo', 'DataHora_ltimo']
-df_processed.drop(columns=cols_to_drop, errors='ignore', inplace=True)
+# ===================================================================
+# FUNÇÕES DO NOTEBOOK ADAPTADAS
+# ===================================================================
 
-original_cols = df_processed.columns.tolist()
+def load_and_clean_data(file_path , null_threshold=0.5):
+    print("\n1. Carregando e limpando dados brutos...")
+    try:
+        df = pd.read_csv(file_path , encoding="utf-8")
+    except Exception as e:
+        print(f"Erro ao carregar CSV: {e}. Certifique-se que o arquivo '{file_path}' está na raiz.")
+        return None
 
-color_cols = [col for col in df_processed.columns if col.startswith('Cor') or col == 'F0207']
-categorical_features = []
-if color_cols:
-    df_color_ohe = pd.get_dummies(df_processed[color_cols].astype(str), prefix=color_cols, dummy_na=False)
-    categorical_features = df_color_ohe.columns.tolist()
-    df_processed = pd.concat([df_processed.drop(columns=color_cols, errors='ignore'), df_color_ohe], axis=1)
+    df.replace("N/A" , np.nan , inplace=True)
+    unwanted_columns = ['Código de Acesso' , 'Data/Hora Último']
+    existing_unwanted_columns = [col for col in unwanted_columns if col in df.columns]
 
-# --- 2. Engenharia de Features ---
-print("2. Criando features de engenharia...")
-Sono_col = [col for col in df_processed.columns if 'QtdHorasSono' in col][0]
-if 'Acordar' in df_processed.columns:
-    max_acordar = df_processed['Acordar'].max()
-    df_processed['Acordar_Invertido'] = max_acordar - df_processed['Acordar']
-    df_processed['Indice_Sono_T1'] = df_processed[Sono_col] * df_processed['Acordar_Invertido']
-if 'F1103' in df_processed.columns and 'F0713' in df_processed.columns:
-    df_processed['F_Oposto_T3'] = df_processed['F1103'] - df_processed['F0713']
-F07_cols = [col for col in df_processed.columns if col.startswith('F07') and len(col) == 5]
-if F07_cols: df_processed['F07_Media'] = df_processed[F07_cols].mean(axis=1)
-F11_cols = [col for col in df_processed.columns if col.startswith('F11') and len(col) == 5]
-if F11_cols: df_processed['F11_Media'] = df_processed[F11_cols].mean(axis=1)
-if 'P09' in df_processed.columns and 'T09' in df_processed.columns:
-    df_processed['Eficiencia_P09_T09'] = df_processed['P09'] / df_processed['T09'].replace(0, 1e-6)
-p_cols = [col for col in df_processed.columns if col.startswith('P') and len(col) == 3]
-t_cols = [col for col in df_processed.columns if col.startswith('T') and len(col) == 3]
-if p_cols and t_cols:
-    df_processed['Eficiencia_Total'] = df_processed[p_cols].sum(axis=1, skipna=True) / df_processed[t_cols].sum(axis=1, skipna=True).replace(0, 1e-6)
-if 'F11_Media' in df_processed.columns and 'F07_Media' in df_processed.columns:
-    df_processed['Gap_F11_F07'] = df_processed['F11_Media'] - df_processed['F07_Media']
-if 'QtdHorasDormi' in df_processed.columns and 'QtdHorasSono' in df_processed.columns:
-    df_processed['Sono_Ineficiencia'] = df_processed['QtdHorasDormi'] - df_processed['QtdHorasSono']
-if 'PTempoTotal' in df_processed.columns and 'TempoTotal' in df_processed.columns:
-    df_processed['Indice_Final_PT_T'] = df_processed['PTempoTotal'] / df_processed['TempoTotal'].replace(0, 1e-6)
-all_p_cols = [col for col in df_processed.columns if col.startswith('P') and (len(col) == 3 or len(col) == 4)]
-for p_col in all_p_cols:
-    t_col = 'T' + p_col[1:]
-    new_col_name = f'Eficiencia_{p_col}_{t_col}'
-    if t_col in df_processed.columns and 'Expl' not in t_col and new_col_name not in df_processed.columns:
-        df_processed[new_col_name] = df_processed[p_col] / df_processed[t_col].replace(0, 1e-6)
-df_processed.drop(columns=[col for col in df_processed.columns if '_Limpo' in col or col.startswith('Soma_') or 'Acordar_Invertido' in col], errors='ignore', inplace=True)
-numerical_cols = df_processed.select_dtypes(include=np.number).columns
-for col in [c for c in numerical_cols if c not in ['Target1', 'Target2', 'Target3']]:
-    df_processed.loc[df_processed[col] < 0, col] = np.nan
+    null_fraction = df.isna().mean()
+    columns_with_many_nulls = null_fraction [null_fraction > null_threshold].index.tolist()
 
-# --- 3. Imputação e Clusterização ---
-print("3. Imputando dados e executando a clusterização...")
-TARGETS = ['Target1', 'Target2', 'Target3']
-cod_acesso = cod_acesso.loc[df_processed.index.intersection(df_processed.dropna(subset=TARGETS).index)]
-df_processed.dropna(subset=TARGETS, inplace=True)
-for col in df_processed.columns:
-    if df_processed[col].isnull().any():
-        if pd.api.types.is_numeric_dtype(df_processed[col]):
-            df_processed[col] = df_processed[col].fillna(df_processed[col].median())
-        else:
-            df_processed[col] = df_processed[col].fillna(df_processed[col].mode()[0])
-X_full = df_processed.drop(columns=TARGETS + ['Cdigo_de_Acesso'], errors='ignore')
-y = df_processed[TARGETS]
-for col in X_full.select_dtypes(include='bool').columns:
-    X_full[col] = X_full[col].astype(int)
-numerical_features_for_clustering = X_full.select_dtypes(include=np.number).columns.tolist()
-cluster_pipeline = Pipeline(steps=[
-    ('scaler', StandardScaler()),
-    ('pca', PCA(n_components=50, random_state=42)),
-    ('kmeans', KMeans(n_clusters=2, random_state=42, n_init=10))
-])
-cluster_labels = cluster_pipeline.fit_predict(X_full[numerical_features_for_clustering])
-df_processed['cluster'] = cluster_labels
-perfil_clusters = df_processed.groupby('cluster')[numerical_features_for_clustering].mean()
+    columns_to_remove = list(set(existing_unwanted_columns + columns_with_many_nulls))
 
-# --- 4. Preparação Final e Divisão Treino-Validação-Teste ---
-print("4. Dividindo dados em treino, validação e teste...")
-df_processed_ohe = pd.get_dummies(df_processed, columns=['cluster'], prefix='Cluster')
-X_final = df_processed_ohe.drop(columns=TARGETS + ['Cdigo_de_Acesso'], errors='ignore')
-for col in X_final.select_dtypes(include='bool').columns:
-    X_final[col] = X_final[col].astype(int)
-final_model_columns = X_final.columns.tolist()
+    if columns_to_remove:
+        df = df.drop(columns=columns_to_remove)
 
-# Primeira divisão: 80% para treino+validação, 20% para teste
-X_train_val, X_test, y_train_val, y_test = train_test_split(X_final, y, test_size=0.2, random_state=42)
-# Segunda divisão: 80% de 80% para treino (64% do total), 20% de 80% para validação (16% do total)
-X_train, X_val, y_train, y_val = train_test_split(X_train_val, y_train_val, test_size=0.2, random_state=42)
+    target_columns = [col for col in df.columns if 'Target' in col]
+    if target_columns:
+        df = df.dropna(subset=target_columns)
 
-# --- 5. Treinamento para Avaliação e Geração do CSV ---
-print("5. Treinando modelo na partição de treino e avaliando na de teste...")
-estimators = [('rf', RandomForestRegressor(n_estimators=500, max_depth=15, random_state=42, n_jobs=-1)), ('ridge', RidgeCV())]
-stacking_regressor = StackingRegressor(estimators=estimators, final_estimator=Lasso(alpha=0.001, random_state=42), cv=5)
-df_for_frontend = df_processed.loc[y_test.index].copy()
-df_for_frontend['Código de Acesso'] = cod_acesso.loc[y_test.index]
-for target_name in TARGETS:
-    model_clone_for_eval = clone(stacking_regressor)
-    model_clone_for_eval.fit(X_train, y_train[target_name])
-    predictions_test = model_clone_for_eval.predict(X_test)
-    df_for_frontend[f'{target_name}_Previsto'] = predictions_test
-df_for_frontend.to_csv('frontend/jogadores_com_clusters.csv', index=False)
-print("   - Arquivo 'jogadores_com_clusters.csv' gerado com dados de teste.")
+    print(f"Dados limpos: {df.shape}")
+    return df
 
-# --- 6. Treinamento Final e Salvamento de Artefatos para API ---
-print("6. Retreinando o modelo com 100% dos dados para a API...")
-final_models_for_api = {}
-for target_name in TARGETS:
-    model_clone_for_api = clone(stacking_regressor)
-    model_clone_for_api.fit(X_final, y[target_name])
-    final_models_for_api[target_name] = model_clone_for_api
 
-# --- 7. Salvando Artefatos da API ---
-print("7. Salvando todos os artefatos para a API...")
-output_dir = "backend/model_artifacts"
-os.makedirs(output_dir, exist_ok=True)
-joblib.dump(final_models_for_api['Target1'], os.path.join(output_dir, "stacking_model_target1.joblib"))
-joblib.dump(final_models_for_api['Target2'], os.path.join(output_dir, "stacking_model_target2.joblib"))
-joblib.dump(final_models_for_api['Target3'], os.path.join(output_dir, "stacking_model_target3.joblib"))
-joblib.dump(cluster_pipeline, os.path.join(output_dir, "cluster_pipeline.joblib"))
-perfil_clusters.to_csv(os.path.join(output_dir, "perfil_clusters.csv"))
-model_config = {
-    "final_model_columns": final_model_columns,
-    "numerical_features_for_clustering": numerical_features_for_clustering,
-    "categorical_features": categorical_features
+def process_data_imputation(df):
+    print("\n2. Processando e imputando valores ausentes...")
+    targets = [col for col in df.columns if 'Target' in col or 'target' in col.lower()]
+    df_targets = df [targets].copy() if targets else pd.DataFrame()
+
+    categorical_manual = [
+        'QtdComida' , 'QtdPessoas' , 'QtdSom' , 'QtdHorasDormi' , 'QtdHorasSono' ,
+        'Acordar' , 'F0705' , 'F0706' , 'F0707' , 'F0708' , 'F0709' , 'F0710' , 'F0711' , 'F0712' , 'F0713' ,
+        'F1101' , 'F1103' , 'F1105' , 'F1107' , 'F1109' , 'F1111' , 'P04' , 'P08' , 'P10' , 'P12' , 'P02' , 'P03' ,
+        'P07' , 'P09' , 'P13' , 'F0104' , 'F0201' , 'F0203' , 'F0205' , 'QtdDormir' , 'F0101' , 'F0102' ,
+        'L0210 (não likert)'
+    ]
+
+    numeric_columns = [c for c in df.columns if
+                       c not in targets and c not in categorical_manual and pd.api.types.is_numeric_dtype(df [c])]
+    categorical_columns = [c for c in df.columns if c not in targets and c not in numeric_columns]
+
+    # Imputação
+    numeric_imputer = SimpleImputer(strategy="median")
+    df [numeric_columns] = numeric_imputer.fit_transform(df [numeric_columns])
+
+    categorical_imputer = SimpleImputer(strategy="most_frequent")
+    df [categorical_columns] = categorical_imputer.fit_transform(df [categorical_columns])
+
+    print("Imputação concluída.")
+    return df , numeric_columns , categorical_columns , numeric_imputer , categorical_imputer
+
+
+def handle_out_of_range_values(df , valid_ranges):
+    print("\n3. Tratando valores fora do intervalo...")
+    imputer = SimpleImputer(strategy='most_frequent')
+    for column , value_range in valid_ranges.items():
+        if column in df.columns:
+            lower_bound , upper_bound = value_range
+            df [column] = pd.to_numeric(df [column] , errors='coerce')
+            out_of_range_mask = (df [column] < lower_bound) | (df [column] > upper_bound)
+            if out_of_range_mask.sum() > 0:
+                df.loc [out_of_range_mask , column] = np.nan
+                df [[column]] = imputer.fit_transform(df [[column]])
+    print("Tratamento de outliers concluído.")
+    return df
+
+
+def handle_negative_values(df , categorical_features):
+    print("\n4. Tratando valores negativos...")
+    for column in df.columns:
+        if column not in categorical_features:  # Apenas numéricas
+            col_num = pd.to_numeric(df [column] , errors='coerce')
+            neg_mask = col_num < 0
+            if neg_mask.sum() > 0:
+                median_value = col_num [col_num >= 0].median()
+                df.loc [neg_mask , column] = median_value
+    print("Tratamento de negativos concluído.")
+    return df
+
+
+def apply_one_hot_encoding(X_train , X_test , ohe_cols):
+    print("\n5. Aplicando One-Hot Encoding...")
+    encoder = OneHotEncoder(handle_unknown="ignore" , sparse_output=False , drop=None)
+
+    X_train_enc = encoder.fit_transform(X_train [ohe_cols])
+    X_test_enc = encoder.transform(X_test [ohe_cols])
+
+    enc_cols = encoder.get_feature_names_out(ohe_cols)
+    X_train_enc_df = pd.DataFrame(X_train_enc , columns=enc_cols , index=X_train.index)
+    X_test_enc_df = pd.DataFrame(X_test_enc , columns=enc_cols , index=X_test.index)
+
+    X_train_final = pd.concat([X_train.drop(columns=ohe_cols) , X_train_enc_df] , axis=1)
+    X_test_final = pd.concat([X_test.drop(columns=ohe_cols) , X_test_enc_df] , axis=1)
+
+    print(f"Features após OHE: {X_train_final.shape [1]}")
+    return X_train_final , X_test_final , encoder
+
+
+# ===================================================================
+# SCRIPT PRINCIPAL
+# ===================================================================
+
+# -- CARGA E LIMPEZA INICIAL --
+df_raw = load_and_clean_data(DATA_FILE)
+if df_raw is None:
+    exit()
+
+codigo_acesso = df_raw ["Código de Acesso"].copy() if "Código de Acesso" in df_raw.columns else pd.Series(
+    index=df_raw.index)
+
+# -- IMPUTAÇÃO --
+df_imputed , numeric_cols , categ_cols , num_imputer , cat_imputer = process_data_imputation(df_raw.copy())
+
+# -- TRATAMENTO DE VALORES --
+valid_ranges = {
+    'QtdComida': (0 , 3) , 'QtdPessoas': (0 , 2) , 'QtdSom': (0 , 3) , 'QtdHorasDormi': (0 , 3) ,
+    'QtdHorasSono': (0 , 2) , 'Acordar': (1 , 5) , 'F0705': (1 , 5) , 'F0706': (1 , 5) ,
+    'F0707': (1 , 5) , 'F0708': (1 , 5) , 'F0709': (1 , 5) , 'F0710': (1 , 5) , 'F0711': (1 , 5) ,
+    'F0712': (1 , 5) , 'F0713': (1 , 5) , 'F1101': (0 , 4) , 'F1103': (0 , 4) , 'F1105': (0 , 4) ,
+    'F1107': (0 , 4) , 'F1109': (0 , 4) , 'F1111': (0 , 4) , 'P04': (1 , 5) , 'P08': (1 , 5) ,
+    'P10': (1 , 5) , 'P12': (1 , 5) , 'P02': (1 , 5) , 'P03': (1 , 5) , 'P07': (1 , 5) ,
+    'P09': (1 , 5) , 'P13': (1 , 5) , 'F0104': (0 , 5) , 'F0201': (0 , 9) , 'F0203': (0 , 9) ,
+    'F0205': (0 , 2) , 'L0210': (1 , 8) , 'QtdDormir': (0 , 2) , 'F0101': (0 , 5) , 'F0102': (0 , 3)
 }
-with open(os.path.join(output_dir, "model_config.json"), 'w') as f:
-    json.dump(model_config, f, indent=4)
+df_ranged = handle_out_of_range_values(df_imputed.copy() , valid_ranges)
+df_final = handle_negative_values(df_ranged.copy() , categ_cols)
 
-print("\nProcesso concluído com sucesso!")
+# -- SEPARAÇÃO DE DADOS --
+TARGETS = ['Target1' , 'Target2' , 'Target3']
+X = df_final.drop(columns=TARGETS)
+y = df_final [TARGETS]
+
+X_train , X_test , y_train , y_test = train_test_split(X , y , test_size=0.2 , random_state=RANDOM_STATE)
+
+# -- PRÉ-PROCESSAMENTO (SCALER E OHE) --
+numerical_features = [c for c in X.columns if c not in categ_cols]
+scaler = StandardScaler()
+X_train [numerical_features] = scaler.fit_transform(X_train [numerical_features])
+X_test [numerical_features] = scaler.transform(X_test [numerical_features])
+
+ohe_cols = ['Cor0202' , 'Cor0204' , 'Cor0206' , 'F0207' , 'Cor0208' , 'Cor0209Outro']
+X_train_final , X_test_final , encoder = apply_one_hot_encoding(X_train , X_test , ohe_cols)
+
+# -- CLUSTERIZAÇÃO (PARA ANÁLISE E CSV DO FRONTEND) --
+print("\n6. Realizando clusterização para análise...")
+kmeans_model = KMeans(n_clusters=2 , n_init=10 , random_state=RANDOM_STATE)
+# Usaremos os dados pré-processados finais para o cluster, para consistência
+cluster_labels_train = kmeans_model.fit_predict(X_train_final)
+cluster_labels_test = kmeans_model.predict(X_test_final)
+
+# -- TREINAMENTO E SELEÇÃO DE MODELOS --
+print("\n7. Treinando e selecionando os melhores modelos para cada Target...")
+all_selected_features = {}
+best_models = {}
+
+
+def get_regression_models():
+    base_learners = [
+        ("RandomForestRegressor" ,
+         RandomForestRegressor(n_estimators=400 , n_jobs=N_JOBS , random_state=RANDOM_STATE)) ,
+        ("ExtraTreesRegressor" , ExtraTreesRegressor(n_estimators=600 , n_jobs=N_JOBS , random_state=RANDOM_STATE)) ,
+    ]
+    stacking_model = StackingRegressor(estimators=base_learners ,
+                                       final_estimator=RandomForestRegressor(n_estimators=100 , n_jobs=N_JOBS ,
+                                                                             random_state=RANDOM_STATE))
+    return [
+        ("RandomForestRegressor" ,
+         RandomForestRegressor(n_estimators=400 , n_jobs=N_JOBS , random_state=RANDOM_STATE)) ,
+        ("ExtraTreesRegressor" , ExtraTreesRegressor(n_estimators=600 , n_jobs=N_JOBS , random_state=RANDOM_STATE)) ,
+        ("XGBoost" , XGBRegressor(random_state=RANDOM_STATE)) ,
+        ("StackingRegressor" , stacking_model) ,
+    ]
+
+
+for target in TARGETS:
+    print(f"\n--- Treinando para: {target} ---")
+    correlations = X_train_final.corrwith(y_train [target]).abs()
+    selected_features = correlations [correlations > 0.29].index.tolist()
+    all_selected_features [target] = selected_features
+    print(f"   - Features selecionadas: {len(selected_features)}")
+
+    X_train_sel = X_train_final [selected_features]
+
+    best_score = float('inf')
+    best_model_instance = None
+    best_model_name = ""
+
+    for name , model in get_regression_models():
+        cv = KFold(n_splits=CV_FOLDS , shuffle=True , random_state=RANDOM_STATE)
+        mse_scores = -cross_val_score(model , X_train_sel , y_train [target] , cv=cv ,
+                                      scoring="neg_mean_squared_error" , n_jobs=N_JOBS)
+        rmse_score = np.mean(np.sqrt(mse_scores))
+        if rmse_score < best_score:
+            best_score = rmse_score
+            best_model_instance = model
+            best_model_name = name
+
+    print(f"   - Melhor modelo: {best_model_name} (RMSE CV: {best_score:.4f})")
+    best_model_instance.fit(X_train_sel , y_train [target])
+    best_models [target] = best_model_instance
+
+# -- GERAÇÃO DE ARQUIVO CSV PARA FRONTEND --
+print("\n8. Gerando CSV de teste para o frontend...")
+df_front = df_raw.loc [y_test.index].copy()
+df_front.rename(columns={'L0210 (não likert)': 'L0210_no_likert' , 'Código de Acesso': 'Cdigo_de_Acesso'} ,
+                inplace=True)
+df_front ['cluster'] = cluster_labels_test
+
+for target in TARGETS:
+    selected_cols = all_selected_features [target]
+    preds = best_models [target].predict(X_test_final [selected_cols])
+    df_front [f'{target}_Previsto'] = preds
+
+# O frontend espera as colunas one-hot-encoded, então vamos juntá-las
+df_front_final = pd.concat([
+    df_front.reset_index(drop=True) ,
+    pd.DataFrame(X_test_final.reset_index(drop=True) , columns=X_train_final.columns)
+] , axis=1)
+
+# Remover colunas duplicadas que possam surgir
+df_front_final = df_front_final.loc [: , ~df_front_final.columns.duplicated()]
+
+csv_out_path = PUBLIC_DIR / "jogadores_com_clusters.csv"
+df_front_final.to_csv(csv_out_path , index=False)
+print(f"   - CSV para frontend salvo em: {csv_out_path}")
+
+# -- SALVANDO ARTEFATOS FINAIS --
+print("\n9. Salvando todos os artefatos do modelo...")
+joblib.dump(num_imputer , ARTIFACTS_DIR / 'numeric_imputer.joblib')
+joblib.dump(cat_imputer , ARTIFACTS_DIR / 'categorical_imputer.joblib')
+joblib.dump(scaler , ARTIFACTS_DIR / 'scaler.joblib')
+joblib.dump(encoder , ARTIFACTS_DIR / 'encoder_ohe.joblib')
+joblib.dump(kmeans_model , ARTIFACTS_DIR / 'kmeans_model.joblib')  # Salva o modelo KMeans
+
+for target , model in best_models.items():
+    joblib.dump(model , ARTIFACTS_DIR / f'best_model_{target}.joblib')
+
+column_info = {
+    'all_features_imputed': df_final.drop(columns=TARGETS).columns.tolist() ,
+    'numerical_features': numerical_features ,
+    'categorical_features': categ_cols ,
+    'ohe_cols': ohe_cols ,
+    'final_model_columns': X_train_final.columns.tolist() ,
+    'selected_features_by_target': all_selected_features ,
+    'valid_ranges': valid_ranges
+}
+with open(ARTIFACTS_DIR / "column_info.json" , "w") as f:
+    json.dump(column_info , f , indent=2)
+
+print("\n--- Processo concluído com sucesso! ---")
