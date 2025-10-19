@@ -1,5 +1,5 @@
 // src/components/AnalysisDashboard.jsx
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Box,
   Grid,
@@ -8,25 +8,24 @@ import {
   Typography,
   CircularProgress,
   Alert,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  OutlinedInput,
-  Checkbox,
-  ListItemText,
   Tooltip,
   Chip,
   Button,
+  TextField,
 } from "@mui/material";
-import ClusterProfiles from "./ClusterProfiles";
 import HelpOutline from "@mui/icons-material/HelpOutline";
 import Download from "@mui/icons-material/Download";
+import RefreshIcon from "@mui/icons-material/Refresh";
 import Plot from "react-plotly.js";
 
-// ------------------------
+// =========================
+// CONFIG
+// =========================
+const DATASET_URL = "/jogadores_com_clusters.csv"; // ajuste se necessário
+
+// =========================
 // helpers
-// ------------------------
+// =========================
 const calcRMSE = (a, p) => {
   const n = a.length || 0;
   if (!n) return 0;
@@ -70,43 +69,29 @@ const badge = (rmse, r2) => {
   return { label: "Atenção", color: "error" };
 };
 
-// tooltips (iguais)
-const TT = {
-  FILTER: "Escolha quais clusters ficam ativos na tela.",
-  CARDS_PLAYERS: "Quantidade de jogadores após o filtro.",
-  CARDS_CLUSTERS: "Clusters distintos no recorte.",
-  CARDS_FEAT: "Número de variáveis de entrada esperadas pelo modelo.",
-  CARDS_PIPE: "Se o pipeline de cluster está disponível no backend.",
-  RMSE: "Erro médio em unidades do alvo. Menor é melhor.",
-  R2: "Proporção de variação explicada. Pode ser negativa.",
-  MAE: "Erro Absoluto Médio. Menor é melhor.",
-  BIAS: "Média (Previsto − Real): positivo superestima; negativo subestima.",
-  SCATTER: "Cada ponto é um jogador. Linha tracejada é o ideal.",
-  RESIDUALS: "Histograma de resíduos: ideal é centrado em 0.",
-  DISTRIB: "Quantos jogadores há em cada cluster.",
+// Escala para % se necessário (0–1 -> 0–100)
+const toPercent = (arr) => {
+  const xs = arr.filter((v) => Number.isFinite(v));
+  if (!xs.length) return arr;
+  const maxv = Math.max(...xs);
+  return maxv <= 1 ? arr.map((v) => (Number.isFinite(v) ? v * 100 : v)) : arr;
 };
 
-// download CSV
-const downloadCSV = (rows) => {
-  try {
-    if (!rows?.length) return;
-    const header = Object.keys(rows[0]);
-    const csv = [header.join(",")]
-      .concat(rows.map((r) => header.map((h) => r[h]).join(",")))
-      .join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "jogadores_filtrado.csv";
-    a.click();
-    URL.revokeObjectURL(url);
-  } catch (e) {
-    console.error(e);
+// Agrupa nas faixas <low, [low, high], >high
+const bucketize = (vals, low = 30, high = 60) => {
+  let lt = 0,
+    mid = 0,
+    gt = 0;
+  for (const v of vals) {
+    if (!Number.isFinite(v)) continue;
+    if (v < low) lt++;
+    else if (v <= high) mid++;
+    else gt++;
   }
+  return { "<30": lt, "30-60": mid, ">60": gt };
 };
 
-// CSV -> JSON robusto
+// CSV -> JSON genérico
 const parseCSV = (text) => {
   try {
     const cleaned = text.trim();
@@ -123,33 +108,58 @@ const parseCSV = (text) => {
       });
       return obj;
     });
-    return data.filter((r) => r.cluster !== undefined && r.cluster !== "");
+    return data;
   } catch (e) {
     console.error("parseCSV error", e);
     return [];
   }
 };
 
+// download CSV (do que estiver na tela)
+const downloadCSV = (rows) => {
+  try {
+    if (!rows?.length) return;
+    const header = Object.keys(rows[0]);
+    const csv = [header.join(",")]
+      .concat(rows.map((r) => header.map((h) => r[h]).join(",")))
+      .join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "dataset_previsto.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    console.error(e);
+  }
+};
+
+const TT = {
+  SCATTER:
+    "Cada ponto é um registro. Linha tracejada é a linha ideal (y=x).",
+  RESIDUALS:
+    "Histograma de resíduos (Previsto − Real). Ideal é centrado em 0.",
+  BUCKETS:
+    "Contagem de pessoas por faixa de percentuais (<30 | 30–60 | >60) em cada target, a partir dos valores PREVISTOS.",
+};
+
+const TARGETS = ["Target1", "Target2", "Target3"];
+
 function AnalysisDashboard() {
-  const [data, setData] = useState([]);
-  const [selectedClusters, setSelectedClusters] = useState([]);
+  const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [thresholds, setThresholds] = useState({ low: 30, high: 60 });
 
   useEffect(() => {
     (async () => {
       try {
-        const resp = await fetch("/jogadores_com_clusters.csv");
-        if (!resp.ok)
-          throw new Error("Falha ao carregar /jogadores_com_clusters.csv");
+        const resp = await fetch(DATASET_URL);
+        if (!resp.ok) throw new Error(`Falha ao carregar ${DATASET_URL}`);
         const text = await resp.text();
         const parsed = parseCSV(text);
-        const clusters = [...new Set(parsed.map((r) => r.cluster))].filter(
-          (v) => v !== "" && v !== null && v !== undefined
-        );
-        clusters.sort((a, b) => Number(a) - Number(b));
-        setData(parsed);
-        setSelectedClusters(clusters);
+        setRows(parsed);
       } catch (e) {
         console.error(e);
         setError(e.message || "Erro ao carregar CSV.");
@@ -159,52 +169,43 @@ function AnalysisDashboard() {
     })();
   }, []);
 
-  const clusterOptions = useMemo(() => {
-    const cs = [...new Set(data.map((r) => r.cluster))].filter(
-      (v) => v !== "" && v !== null && v !== undefined
-    );
-    cs.sort((a, b) => Number(a) - Number(b));
-    return cs;
-  }, [data]);
-
-  const filtered = useMemo(() => {
-    if (!Array.isArray(selectedClusters)) return [];
-    return data.filter((r) => selectedClusters.includes(r.cluster));
-  }, [data, selectedClusters]);
-
-  const targets = ["Target1", "Target2", "Target3"];
-
+  // Métricas globais (usa TargetX e TargetX_Previsto do CSV)
   const globalMetrics = useMemo(() => {
     const m = {};
-    for (const t of targets) {
-      const rows = filtered.filter(
-        (r) => Number.isFinite(r[t]) && Number.isFinite(r[`${t}_Previsto`])
+    for (const t of TARGETS) {
+      const realCol = t;
+      const predCol = `${t}_Previsto`;
+      const valid = rows.filter(
+        (r) => Number.isFinite(r[realCol]) && Number.isFinite(r[predCol])
       );
-      const A = rows.map((r) => r[t]);
-      const P = rows.map((r) => r[`${t}_Previsto`]);
+      const A = valid.map((r) => Number(r[realCol]));
+      const P = valid.map((r) => Number(r[predCol]));
       m[t] = {
         rmse: +calcRMSE(A, P).toFixed(2),
         r2: +calcR2(A, P).toFixed(2),
         mae: +calcMAE(A, P).toFixed(2),
         bias: +calcBias(A, P).toFixed(2),
-        n: rows.length,
+        n: valid.length,
       };
     }
     return m;
-  }, [filtered]);
+  }, [rows]);
 
-  // ranges seguros (evita min==max)
+  // Eixos seguros pro comparativo
   const axesByTarget = useMemo(() => {
     const out = {};
-    for (const t of targets) {
-      const rows = filtered.filter(
-        (r) => Number.isFinite(r[t]) && Number.isFinite(r[`${t}_Previsto`])
+    for (const t of TARGETS) {
+      const realCol = t;
+      const predCol = `${t}_Previsto`;
+      const valid = rows.filter(
+        (r) => Number.isFinite(r[realCol]) && Number.isFinite(r[predCol])
       );
-      const A = rows.map((r) => r[t]);
-      const P = rows.map((r) => r[`${t}_Previsto`]);
-      const all = A.concat(P);
-      let min = all.length ? Math.min(...all) : 0;
-      let max = all.length ? Math.max(...all) : 1;
+      const arr = [];
+      for (const r of valid) {
+        arr.push(Number(r[realCol]), Number(r[predCol]));
+      }
+      let min = arr.length ? Math.min(...arr) : 0;
+      let max = arr.length ? Math.max(...arr) : 1;
       if (min === max) {
         min -= 1;
         max += 1;
@@ -212,19 +213,19 @@ function AnalysisDashboard() {
       out[t] = { min: Math.floor(min), max: Math.ceil(max) };
     }
     return out;
-  }, [filtered]);
+  }, [rows]);
 
-  const clusterCounts = useMemo(() => {
-    const acc = {};
-    for (const r of filtered) acc[r.cluster] = (acc[r.cluster] || 0) + 1;
-    return acc;
-  }, [filtered]);
-
-  const handleClusterChange = (e) => {
-    const val = e.target.value;
-    // garante que sempre seja array
-    setSelectedClusters(Array.isArray(val) ? val : []);
-  };
+  // Buckets por faixas a partir dos PREVISTOS
+  const buckets = useMemo(() => {
+    const out = {};
+    for (const t of TARGETS) {
+      const predCol = `${t}_Previsto`;
+      const preds = rows.map((r) => Number(r[predCol])).filter((v) => Number.isFinite(v));
+      const predsPercent = toPercent(preds);
+      out[t] = bucketize(predsPercent, thresholds.low, thresholds.high);
+    }
+    return out;
+  }, [rows, thresholds]);
 
   if (loading)
     return (
@@ -236,100 +237,88 @@ function AnalysisDashboard() {
 
   return (
     <Box>
-      {/* filtro + download */}
+      {/* Topo: ações */}
       <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 3 }}>
-        <Tooltip title={TT.FILTER} arrow>
-          <FormControl sx={{ minWidth: 260 }}>
-            <InputLabel id="cluster-label">Filtrar por Cluster</InputLabel>
-            <Select
-              labelId="cluster-label"
-              multiple
-              value={selectedClusters}
-              onChange={handleClusterChange}
-              input={<OutlinedInput label="Filtrar por Cluster" />}
-              renderValue={(sel) =>
-                Array.isArray(sel)
-                  ? sel
-                      .slice()
-                      .sort((a, b) => Number(a) - Number(b))
-                      .join(", ")
-                  : ""
-              }
-            >
-              {clusterOptions.map((c) => (
-                <MenuItem key={String(c)} value={c}>
-                  <Checkbox checked={selectedClusters.indexOf(c) > -1} />
-                  <ListItemText primary={`Cluster ${c}`} />
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-        </Tooltip>
-
         <Button
           variant="outlined"
           startIcon={<Download />}
-          onClick={() => downloadCSV(filtered)}
+          onClick={() => downloadCSV(rows)}
           sx={{ ml: "auto" }}
         >
-          Baixar CSV (filtrado)
+          Baixar CSV
         </Button>
       </Box>
 
-      {/* cards topo */}
+      {/* Cards topo */}
       <Grid container spacing={2} sx={{ mb: 3 }}>
-        <Grid item xs={12} sm={6} md={3}>
-          <Tooltip title="Jogadores no recorte atual." arrow>
-            <Card>
-              <CardContent>
-                <Typography variant="subtitle2">
-                  JOGADORES (CSV FILTRADO)
-                </Typography>
-                <Typography variant="h4">{filtered.length}</Typography>
-              </CardContent>
-            </Card>
-          </Tooltip>
+        <Grid item xs={12} sm={6} md={4}>
+          <Card>
+            <CardContent>
+              <Typography variant="subtitle2">REGISTROS NO CSV</Typography>
+              <Typography variant="h4">{rows.length}</Typography>
+            </CardContent>
+          </Card>
         </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <Tooltip title="Clusters ativos." arrow>
-            <Card>
-              <CardContent>
-                <Typography variant="subtitle2">CLUSTERS (ATIVOS)</Typography>
-                <Typography variant="h4">
-                  {Object.keys(clusterCounts).length}
-                </Typography>
-              </CardContent>
-            </Card>
-          </Tooltip>
+
+        <Grid item xs={12} sm={6} md={4}>
+          <Card>
+            <CardContent>
+              <Typography variant="subtitle2">TARGETS COM PREVISTO</Typography>
+              <Typography variant="h4">
+                {
+                  TARGETS.reduce(
+                    (acc, t) =>
+                      acc +
+                      (rows.some((r) => Number.isFinite(r[`${t}_Previsto`])) ? 1 : 0),
+                    0
+                  )
+                }
+              </Typography>
+            </CardContent>
+          </Card>
         </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <Tooltip title="Número de features esperadas pelo modelo." arrow>
-            <Card>
-              <CardContent>
-                <Typography variant="subtitle2">FEATURES ESPERADAS</Typography>
-                <Typography variant="h4">396</Typography>
-              </CardContent>
-            </Card>
-          </Tooltip>
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <Tooltip title="Pipeline de cluster disponível." arrow>
-            <Card>
-              <CardContent>
-                <Typography variant="subtitle2">PIPELINE DE CLUSTER</Typography>
-                <Typography variant="h4">Sim</Typography>
-              </CardContent>
-            </Card>
-          </Tooltip>
+
+        {/* Limiar ajustável (impacta o agrupamento por faixas) */}
+        <Grid item xs={12} sm={12} md={4}>
+          <Card>
+            <CardContent>
+              <Typography variant="subtitle2">LIMIARES ATUAIS</Typography>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1, mt: 1 }}>
+                <TextField
+                  label="Baixo (%)"
+                  type="number"
+                  size="small"
+                  value={thresholds.low}
+                  onChange={(e) =>
+                    setThresholds((t) => ({ ...t, low: Number(e.target.value) }))
+                  }
+                  sx={{ width: 120 }}
+                />
+                <TextField
+                  label="Alto (%)"
+                  type="number"
+                  size="small"
+                  value={thresholds.high}
+                  onChange={(e) =>
+                    setThresholds((t) => ({ ...t, high: Number(e.target.value) }))
+                  }
+                  sx={{ width: 120 }}
+                />
+                <Tooltip title="O gráfico de faixas será recalculado automaticamente" arrow>
+                  <RefreshIcon sx={{ ml: 0.5, color: "text.secondary" }} />
+                </Tooltip>
+              </Box>
+            </CardContent>
+          </Card>
         </Grid>
       </Grid>
 
-      {/* métricas globais */}
+      {/* Métricas globais */}
       <Typography variant="h6" sx={{ mb: 1 }}>
-        Métricas Globais (área filtrada)
+        Métricas Globais (comparando Real vs Previsto)
       </Typography>
       <Grid container spacing={2} sx={{ mb: 3 }}>
-        {["Target1", "Target2", "Target3"].map((t) => {
+        {TARGETS.map((t) => {
           const { rmse, r2, mae, bias, n } = globalMetrics[t] || {
             rmse: 0,
             r2: 0,
@@ -350,53 +339,28 @@ function AnalysisDashboard() {
                     </Typography>
                   </Box>
 
-                  <Tooltip title={TT.RMSE} arrow>
-                    <Box
-                      sx={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 0.5,
-                        mt: 0.5,
-                      }}
-                    >
+                  <Tooltip title="Erro médio quadrático. Menor é melhor." arrow>
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, mt: 0.5 }}>
                       <Typography>RMSE: {rmse}</Typography>
-                      <HelpOutline
-                        fontSize="small"
-                        sx={{ color: "grey.500" }}
-                      />
+                      <HelpOutline fontSize="small" sx={{ color: "grey.500" }} />
                     </Box>
                   </Tooltip>
-                  <Tooltip title={TT.R2} arrow>
-                    <Box
-                      sx={{ display: "flex", alignItems: "center", gap: 0.5 }}
-                    >
+                  <Tooltip title="Proporção da variação explicada. Pode ser negativa." arrow>
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
                       <Typography>R²: {r2}</Typography>
-                      <HelpOutline
-                        fontSize="small"
-                        sx={{ color: "grey.500" }}
-                      />
+                      <HelpOutline fontSize="small" sx={{ color: "grey.500" }} />
                     </Box>
                   </Tooltip>
-                  <Tooltip title={TT.MAE} arrow>
-                    <Box
-                      sx={{ display: "flex", alignItems: "center", gap: 0.5 }}
-                    >
+                  <Tooltip title="Erro absoluto médio. Menor é melhor." arrow>
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
                       <Typography>MAE: {mae}</Typography>
-                      <HelpOutline
-                        fontSize="small"
-                        sx={{ color: "grey.500" }}
-                      />
+                      <HelpOutline fontSize="small" sx={{ color: "grey.500" }} />
                     </Box>
                   </Tooltip>
-                  <Tooltip title={TT.BIAS} arrow>
-                    <Box
-                      sx={{ display: "flex", alignItems: "center", gap: 0.5 }}
-                    >
+                  <Tooltip title="Média (Previsto − Real): positivo superestima; negativo subestima." arrow>
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
                       <Typography>Viés: {bias}</Typography>
-                      <HelpOutline
-                        fontSize="small"
-                        sx={{ color: "grey.500" }}
-                      />
+                      <HelpOutline fontSize="small" sx={{ color: "grey.500" }} />
                     </Box>
                   </Tooltip>
                 </CardContent>
@@ -406,30 +370,32 @@ function AnalysisDashboard() {
         })}
       </Grid>
 
-      {/* Dispersões */}
+      {/* Comparativo Real vs Previsto */}
       <Typography variant="h6" sx={{ mb: 1 }}>
-        Comparativo Real vs. Previsto
+        Comparativo Real vs Previsto
       </Typography>
       <Grid container spacing={2} sx={{ mb: 4 }}>
-        {["Target1", "Target2", "Target3"].map((t) => {
-          const rows = filtered.filter(
-            (r) => Number.isFinite(r[t]) && Number.isFinite(r[`${t}_Previsto`])
+        {TARGETS.map((t) => {
+          const realCol = t;
+          const predCol = `${t}_Previsto`;
+          const valid = rows.filter(
+            (r) => Number.isFinite(r[realCol]) && Number.isFinite(r[predCol])
           );
-          if (rows.length === 0)
+          if (valid.length === 0)
             return (
               <Grid item xs={12} md={4} key={t}>
-                <Alert severity="info">Sem dados para {t}</Alert>
+                <Alert severity="info">Sem dados comparáveis para {t}</Alert>
               </Grid>
             );
 
-          const A = rows.map((r) => r[t]);
-          const P = rows.map((r) => r[`${t}_Previsto`]);
+          const A = valid.map((r) => Number(r[realCol]));
+          const P = valid.map((r) => Number(r[predCol]));
           const { min, max } = axesByTarget[t];
-          const hover = rows.map(
-            (r, i) =>
-              `Real: ${A[i]?.toFixed?.(2) ?? A[i]}<br>Previsto: ${
-                P[i]?.toFixed?.(2) ?? P[i]
-              }<br>Resíduo: ${(P[i] - A[i])?.toFixed?.(2)}`
+          const hover = A.map(
+            (a, i) =>
+              `Real (X): ${a?.toFixed?.(2) ?? a}<br>` +
+              `Previsto (Y): ${P[i]?.toFixed?.(2) ?? P[i]}<br>` +
+              `Resíduo (Y−X): ${(P[i] - a)?.toFixed?.(2)}`
           );
 
           return (
@@ -443,7 +409,7 @@ function AnalysisDashboard() {
                         y: P,
                         mode: "markers",
                         type: "scatter",
-                        name: "Previsto vs Real",
+                        name: "Pontos (Previsto vs Real)",
                         marker: { size: 8 },
                         text: hover,
                         hoverinfo: "text",
@@ -453,14 +419,14 @@ function AnalysisDashboard() {
                         y: [min, max],
                         mode: "lines",
                         type: "scatter",
-                        name: "Linha Ideal",
+                        name: "Linha Ideal (y = x)",
                         line: { dash: "dash" },
                       },
                     ]}
                     layout={{
-                      title: `<b>${t}</b>`,
-                      xaxis: { title: "Real (Gabarito)", range: [min, max] },
-                      yaxis: { title: "Previsto (Modelo)", range: [min, max] },
+                      title: `<b>${t} — Comparativo</b>`,
+                      xaxis: { title: "Real", range: [min, max] },
+                      yaxis: { title: "Previsto", range: [min, max] },
                       autosize: true,
                       paper_bgcolor: "#29384B",
                       plot_bgcolor: "#29384B",
@@ -478,69 +444,38 @@ function AnalysisDashboard() {
         })}
       </Grid>
 
-      {/* Distribuição de jogadores por cluster */}
+      {/* Ruído (Resíduos) */}
       <Typography variant="h6" sx={{ mb: 1 }}>
-        Distribuição de Jogadores por Cluster
-      </Typography>
-      <ClusterProfiles limit={5} />
-      <Tooltip title={TT.DISTRIB} arrow>
-        <Box component="span" sx={{ display: "inline-block", width: "100%" }}>
-          <Plot
-            data={[
-              {
-                x: Object.keys(clusterCounts),
-                y: Object.values(clusterCounts),
-                type: "bar",
-                text: Object.values(clusterCounts),
-                textposition: "auto",
-              },
-            ]}
-            layout={{
-              title: `Distribuição (${filtered.length} jogadores)`,
-              xaxis: { title: "Cluster" },
-              yaxis: { title: "Quantidade" },
-              autosize: true,
-              paper_bgcolor: "#29384B",
-              plot_bgcolor: "#29384B",
-              font: { color: "#FFFFFF" },
-            }}
-            useResizeHandler
-            style={{ width: "100%", height: 320 }}
-          />
-        </Box>
-      </Tooltip>
-
-      {/* Resíduos */}
-      <Typography variant="h6" sx={{ mb: 1 }}>
-        Qualidade das Previsões (Resíduos)
+        Ruído — Distribuição de Resíduos (Previsto − Real)
       </Typography>
       <Grid container spacing={2} sx={{ mb: 4 }}>
-        {["Target1", "Target2", "Target3"].map((t) => {
-          const rows = filtered.filter(
-            (r) => Number.isFinite(r[t]) && Number.isFinite(r[`${t}_Previsto`])
+        {TARGETS.map((t) => {
+          const realCol = t;
+          const predCol = `${t}_Previsto`;
+          const valid = rows.filter(
+            (r) => Number.isFinite(r[realCol]) && Number.isFinite(r[predCol])
           );
-          const res = rows.map((r) => r[`${t}_Previsto`] - r[t]);
-          const bins = Math.max(
-            6,
-            Math.ceil(Math.log2(Math.max(1, res.length)) + 1)
-          );
+          const res = valid.map((r) => Number(r[predCol]) - Number(r[realCol]));
+          const bins =
+            res.length > 1
+              ? Math.max(6, Math.ceil(Math.log2(Math.max(1, res.length)) + 1))
+              : 6;
+
           return (
             <Grid item xs={12} md={4} key={t}>
               <Tooltip title={TT.RESIDUALS} arrow>
-                <Box
-                  component="span"
-                  sx={{ display: "inline-block", width: "100%" }}
-                >
+                <Box sx={{ width: "100%" }}>
                   <Plot
-                    data={[{ x: res, type: "histogram", nbinsx: bins }]}
+                    data={[{ x: res, type: "histogram", nbinsx: bins, name: "Resíduos" }]}
                     layout={{
-                      title: `${t} — Resíduos (Previsto − Real)`,
+                      title: `${t} — Resíduos (Y − X)`,
                       xaxis: { title: "Resíduo" },
                       yaxis: { title: "Frequência" },
                       autosize: true,
                       paper_bgcolor: "#29384B",
                       plot_bgcolor: "#29384B",
                       font: { color: "#FFFFFF" },
+                      showlegend: false,
                     }}
                     useResizeHandler
                     style={{ width: "100%", height: 260 }}
@@ -551,6 +486,53 @@ function AnalysisDashboard() {
           );
         })}
       </Grid>
+
+      {/* Agrupamento por faixas (POR ÚLTIMO) */}
+      <Typography variant="h6" sx={{ mb: 1 }}>
+        Agrupamento por Faixas (%) — por Target (Previsto)
+      </Typography>
+      <Tooltip title={TT.BUCKETS} arrow>
+        <Box sx={{ width: "100%", mb: 4 }}>
+          <Plot
+            data={[
+              {
+                x: TARGETS,
+                y: TARGETS.map((t) => buckets[t]["<30"] ?? 0),
+                type: "bar",
+                name: "< 30%",
+                hovertemplate: "%{y} abaixo de 30%<extra></extra>",
+              },
+              {
+                x: TARGETS,
+                y: TARGETS.map((t) => buckets[t]["30-60"] ?? 0),
+                type: "bar",
+                name: "30% – 60%",
+                hovertemplate: "%{y} entre 30% e 60%<extra></extra>",
+              },
+              {
+                x: TARGETS,
+                y: TARGETS.map((t) => buckets[t][">60"] ?? 0),
+                type: "bar",
+                name: "> 60%",
+                hovertemplate: "%{y} acima de 60%<extra></extra>",
+              },
+            ]}
+            layout={{
+              barmode: "stack",
+              title: `Distribuição por Faixas (limiares: ${thresholds.low}% / ${thresholds.high}%)`,
+              xaxis: { title: "Targets" },
+              yaxis: { title: "Quantidade de pessoas" },
+              autosize: true,
+              paper_bgcolor: "#29384B",
+              plot_bgcolor: "#29384B",
+              font: { color: "#FFFFFF" },
+              legend: { orientation: "h" },
+            }}
+            useResizeHandler
+            style={{ width: "100%", height: 360 }}
+          />
+        </Box>
+      </Tooltip>
     </Box>
   );
 }
