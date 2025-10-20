@@ -2,10 +2,9 @@
 import axios from "axios";
 
 const API_URL = import.meta.env.VITE_API_URL;   // ex.: http://localhost:8000
-const API_KEY = import.meta.env.VITE_API_KEY;   // mesma do backend
 
-if (!API_URL || !API_KEY) {
-  throw new Error("VITE_API_URL ou VITE_API_KEY não configuradas no .env do frontend.");
+if (!API_URL) {
+  throw new Error("VITE_API_URL não configuradas no .env do frontend.");
 }
 
 // axios base
@@ -13,7 +12,7 @@ const api = axios.create({
   baseURL: API_URL,
   timeout: 60_000,
   headers: {
-    "X-API-Key": API_KEY,
+
     "Content-Type": "application/json",
   },
 });
@@ -61,9 +60,7 @@ export async function runPredictionFromCsv(file) {
     formData.append("file", file);
 
     // importante: NÃO setar Content-Type manualmente aqui
-    const { data } = await api.post("/predict/file", formData, {
-      headers: { "X-API-Key": API_KEY }, // o navegador seta o multipart boundary
-    });
+    const { data } = await api.post("/predict/file", formData);
 
     if (!data || !data.predictions) {
       console.warn("Resposta inesperada da API:", data);
