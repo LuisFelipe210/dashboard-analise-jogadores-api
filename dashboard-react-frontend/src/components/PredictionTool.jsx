@@ -24,7 +24,6 @@ import {
   Backdrop,
   Card,
   CardContent,
-  Divider,
   Stack,
 } from "@mui/material";
 import { runPrediction, getSchema } from "../api/ApiService";
@@ -65,16 +64,25 @@ const LoadingOverlay = ({ open, stepText }) => {
           borderRadius: 4,
           bgcolor: "rgba(18,18,24,0.7)",
           border: "1px solid rgba(255,255,255,0.08)",
-          boxShadow: "0 10px 30px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.06)",
+          boxShadow:
+            "0 10px 30px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.06)",
         }}
       >
-        <Box sx={{ display: "flex", justifyContent: "center", mb: 2 }}>
+        <Box sx={{ display: "flex", justifyContent: "center", mb: 2, }}>
           <CircularProgress />
         </Box>
-        <Typography variant="h6" align="center" sx={{ mb: 1, color: "white", fontWeight: 600 }}>
+        <Typography
+          variant="h6"
+          align="center"
+          sx={{ mb: 1, color: "white", fontWeight: 600 }}
+        >
           Processando análise
         </Typography>
-        <Typography variant="body2" align="center" sx={{ color: "rgba(255,255,255,0.85)" }}>
+        <Typography
+          variant="body2"
+          align="center"
+          sx={{ color: "rgba(255,255,255,0.85)" }}
+        >
           {stepText || "Preparando..."}
         </Typography>
       </Card>
@@ -310,9 +318,14 @@ function PredictionTool() {
   }, [file, readSheetInWorker]);
 
   return (
-    <Box sx={{ minHeight: "100vh", bgcolor: "background.default" }}>
+    <Box sx={{ minHeight: "100vh", width: "100%", bgcolor: "background.default" }}>
       {/* Header fixo */}
-      <AppBar position="sticky" color="transparent" elevation={0} sx={{ borderBottom: "1px solid", borderColor: "divider" }}>
+      <AppBar
+        position="static"
+        color="transparent"
+        elevation={0}
+        sx={{ borderBottom: "1px solid", borderColor: "divider" }}
+      >
         <Toolbar sx={{ gap: 2 }}>
           <Typography variant="h6" sx={{ flexGrow: 1, fontWeight: 700 }}>
             Calcular Targets para Novos Jogadores
@@ -330,17 +343,18 @@ function PredictionTool() {
         </Toolbar>
       </AppBar>
 
-      <Container maxWidth="lg" sx={{ py: 3 }}>
-        {/* Alertas alinhados ao topo do conteúdo */}
+      {/* Usa a largura total da viewport para 50/50 real */}
+      <Container maxWidth={false} disableGutters sx={{ py: 3, px: { xs: 2, md: 4 } }}>
         <Stack spacing={2} sx={{ mb: 3 }}>
           {error && <Alert severity="error">{error}</Alert>}
           {success && <Alert severity="success">{success}</Alert>}
         </Stack>
 
-        {/* Duas colunas principais */}
-        <Grid container spacing={3}>
-          {/* Coluna esquerda: upload e informações do arquivo */}
-          <Grid item xs={12} md={5}>
+        {/* Layout principal: ESQUERDA (upload + filtro) | DIREITA (resultados) */}
+        <Grid container spacing={2} alignItems="flex-start" justifyContent="space-between" sx={{ px: 3, py: 3 }}>
+
+          <Grid item xs={12} md={5} width="49%">
+            {/* Fonte dos dados */}
             <Card variant="outlined">
               <CardContent>
                 <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
@@ -351,7 +365,12 @@ function PredictionTool() {
                 </Typography>
 
                 <Stack direction="row" spacing={2} alignItems="center">
-                  <Button variant="contained" component="label" aria-label="Carregar Excel" disabled={isLoading}>
+                  <Button
+                    variant="contained"
+                    component="label"
+                    aria-label="Carregar Excel"
+                    disabled={isLoading}
+                  >
                     Carregar Excel
                     <input
                       type="file"
@@ -362,17 +381,23 @@ function PredictionTool() {
                     />
                   </Button>
 
-                  <Typography variant="body2" sx={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 280 }}>
+                  <Typography
+                    variant="body2"
+                    sx={{
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      maxWidth: 280,
+                    }}
+                  >
                     {file ? file.name : "Nenhum arquivo selecionado"}
                   </Typography>
                 </Stack>
               </CardContent>
             </Card>
-          </Grid>
 
-          {/* Coluna direita: seletor e dicas */}
-          <Grid item xs={12} md={7}>
-            <Card variant="outlined" sx={{ height: "100%" }}>
+            {/* Filtro e detalhes (abaixo, na própria coluna esquerda) */}
+            <Card variant="outlined" sx={{ mt: 3 }}>
               <CardContent>
                 <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2 }}>
                   Filtro e detalhes
@@ -409,41 +434,51 @@ function PredictionTool() {
               </CardContent>
             </Card>
           </Grid>
+
+          {/* DIREITA: Resultados ocupando 100% da coluna */}
+          <Grid item xs={12} md={5} width="49%">
+            <Box sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
+              <Typography variant="h6" sx={{ mb: 1 }}>
+                Resultados das Previsões
+              </Typography>
+
+              {/* Placeholder para manter a dimensão quando ainda não há previsões */}
+              {!predictions.length && (
+                <Paper variant="outlined" sx={{ flex: 1, minHeight: 420, opacity: 0.3 }} />
+              )}
+
+              {!!predictions.length && (
+                <TableContainer
+                  component={Paper}
+                  sx={{ flex: 1, minHeight: 420, maxHeight: 700, overflowY: "auto" }}
+                >
+                  <Table size="small" stickyHeader aria-label="Tabela de previsões">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Identificador</TableCell>
+                        <TableCell>Cluster Previsto</TableCell>
+                        <TableCell>Target 1 Previsto</TableCell>
+                        <TableCell>Target 2 Previsto</TableCell>
+                        <TableCell>Target 3 Previsto</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {predictions.map((p) => (
+                        <TableRow key={p.identifier} hover>
+                          <TableCell>{p.identifier}</TableCell>
+                          <TableCell>{p.predicted_cluster ?? "-"}</TableCell>
+                          <TableCell>{fmt(p.predicted_target1)}</TableCell>
+                          <TableCell>{fmt(p.predicted_target2)}</TableCell>
+                          <TableCell>{fmt(p.predicted_target3)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              )}
+            </Box>
+          </Grid>
         </Grid>
-
-        {/* Resultados abaixo das colunas, largura total */}
-        {predictions.length > 0 && (
-          <Box sx={{ mt: 4 }}>
-            <Typography variant="h6" gutterBottom>
-              Resultados das Previsões
-            </Typography>
-
-            <TableContainer component={Paper}>
-              <Table size="small" aria-label="Tabela de previsões">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Identificador</TableCell>
-                    <TableCell>Cluster Previsto</TableCell>
-                    <TableCell>Target 1 Previsto</TableCell>
-                    <TableCell>Target 2 Previsto</TableCell>
-                    <TableCell>Target 3 Previsto</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {predictions.map((p) => (
-                    <TableRow key={p.identifier} hover>
-                      <TableCell>{p.identifier}</TableCell>
-                      <TableCell>{p.predicted_cluster != null ? p.predicted_cluster : "-"}</TableCell>
-                      <TableCell>{fmt(p.predicted_target1)}</TableCell>
-                      <TableCell>{fmt(p.predicted_target2)}</TableCell>
-                      <TableCell>{fmt(p.predicted_target3)}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </Box>
-        )}
       </Container>
 
       {/* Overlay mostra a etapa atual */}
