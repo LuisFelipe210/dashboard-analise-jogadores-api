@@ -1,6 +1,10 @@
 // src/components/PredictionTool.jsx
 import React, { useCallback, useMemo, useState, useEffect } from "react";
 import {
+  AppBar,
+  Toolbar,
+  Container,
+  Grid,
   Box,
   Button,
   Typography,
@@ -19,8 +23,10 @@ import {
   MenuItem,
   Backdrop,
   Card,
+  CardContent,
+  Divider,
+  Stack,
 } from "@mui/material";
-// Removido read/utils do xlsx. A leitura acontece no Worker.
 import { runPrediction, getSchema } from "../api/ApiService";
 
 /* ===================== Overlay de loading controlado por etapas ===================== */
@@ -228,7 +234,7 @@ function PredictionTool() {
         worker.postMessage(buf);
       });
       if (!result.success) throw new Error(result.error || "Falha ao processar planilha");
-      return result.data; // jsonData
+      return result.data;
     } finally {
       worker.terminate();
     }
@@ -247,25 +253,21 @@ function PredictionTool() {
       setPredictions([]);
       setSelectedPlayerId("");
 
-      // Etapa 1: leitura no Worker
       setLoadingStep("Lendo a planilha");
-      await Promise.resolve(); // permite renderizar o overlay
+      await Promise.resolve();
       const jsonData = await readSheetInWorker(file);
       if (!Array.isArray(jsonData) || jsonData.length === 0) {
         throw new Error("O arquivo está vazio ou em um formato inválido.");
       }
 
-      // Etapa 2: alinhamento com schema
       setLoadingStep("Alinhando com schema");
       const schemaRaw = await getSchema();
       const schema = adaptSchema(schemaRaw);
       const rows = buildRowsFromSchema(jsonData, schema);
 
-      // Etapa 3: modelo
       setLoadingStep("Rodando o modelo");
       const predsDict = await runPrediction(rows);
 
-      // Etapa 4: preparar resultados
       setLoadingStep("Gerando resultados");
       const n = Math.max(
         predsDict.target1?.length || 0,
@@ -308,108 +310,143 @@ function PredictionTool() {
   }, [file, readSheetInWorker]);
 
   return (
-    <Box>
-      <Typography variant="h5" gutterBottom>
-        Calcular Targets para Novos Jogadores
-      </Typography>
-
-      <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 4 }}>
-        <Button variant="contained" component="label" aria-label="Carregar Excel" disabled={isLoading}>
-          Carregar Arquivo Excel
-          <input
-            type="file"
-            accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            hidden
-            onChange={handleFileChange}
-            disabled={isLoading}
-          />
-        </Button>
-
-        {file && <Typography>{file.name}</Typography>}
-
-        <Button
-          onClick={handlePredict}
-          variant="contained"
-          color="primary"
-          disabled={!file || isLoading}
-          sx={{ ml: "auto" }}
-          aria-label="Realizar análise"
-        >
-          {isLoading ? <CircularProgress size={24} /> : "🚀 Realizar Análise"}
-        </Button>
-      </Box>
-
-      {error && (
-        <Alert severity="error" sx={{ mb: 2 }}>
-          {error}
-        </Alert>
-      )}
-      {success && (
-        <Alert severity="success" sx={{ mb: 2 }}>
-          {success}
-        </Alert>
-      )}
-
-      {predictions.length > 0 && (
-        <>
-          <Typography variant="h6" gutterBottom>
-            Resultados das Previsões
+    <Box sx={{ minHeight: "100vh", bgcolor: "background.default" }}>
+      {/* Header fixo */}
+      <AppBar position="sticky" color="transparent" elevation={0} sx={{ borderBottom: "1px solid", borderColor: "divider" }}>
+        <Toolbar sx={{ gap: 2 }}>
+          <Typography variant="h6" sx={{ flexGrow: 1, fontWeight: 700 }}>
+            Calcular Targets para Novos Jogadores
           </Typography>
 
-          <TableContainer component={Paper} sx={{ mb: 4 }}>
-            <Table size="small" aria-label="Tabela de previsões">
-              <TableHead>
-                <TableRow>
-                  <TableCell>Identificador</TableCell>
-                  <TableCell>Cluster Previsto</TableCell>
-                  <TableCell>Target 1 Previsto</TableCell>
-                  <TableCell>Target 2 Previsto</TableCell>
-                  <TableCell>Target 3 Previsto</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {predictions.map((p) => (
-                  <TableRow key={p.identifier} hover>
-                    <TableCell>{p.identifier}</TableCell>
-                    <TableCell>{p.predicted_cluster != null ? p.predicted_cluster : "-"}</TableCell>
-                    <TableCell>{fmt(p.predicted_target1)}</TableCell>
-                    <TableCell>{fmt(p.predicted_target2)}</TableCell>
-                    <TableCell>{fmt(p.predicted_target3)}</TableCell>
+          <Button
+            onClick={handlePredict}
+            variant="contained"
+            color="primary"
+            disabled={!file || isLoading}
+            aria-label="Realizar análise"
+          >
+            {isLoading ? <CircularProgress size={20} /> : "🚀 Realizar Análise"}
+          </Button>
+        </Toolbar>
+      </AppBar>
+
+      <Container maxWidth="lg" sx={{ py: 3 }}>
+        {/* Alertas alinhados ao topo do conteúdo */}
+        <Stack spacing={2} sx={{ mb: 3 }}>
+          {error && <Alert severity="error">{error}</Alert>}
+          {success && <Alert severity="success">{success}</Alert>}
+        </Stack>
+
+        {/* Duas colunas principais */}
+        <Grid container spacing={3}>
+          {/* Coluna esquerda: upload e informações do arquivo */}
+          <Grid item xs={12} md={5}>
+            <Card variant="outlined">
+              <CardContent>
+                <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
+                  Fonte dos dados
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  Carregue o arquivo Excel com os jogadores para iniciar a análise.
+                </Typography>
+
+                <Stack direction="row" spacing={2} alignItems="center">
+                  <Button variant="contained" component="label" aria-label="Carregar Excel" disabled={isLoading}>
+                    Carregar Excel
+                    <input
+                      type="file"
+                      accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                      hidden
+                      onChange={handleFileChange}
+                      disabled={isLoading}
+                    />
+                  </Button>
+
+                  <Typography variant="body2" sx={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 280 }}>
+                    {file ? file.name : "Nenhum arquivo selecionado"}
+                  </Typography>
+                </Stack>
+              </CardContent>
+            </Card>
+          </Grid>
+
+          {/* Coluna direita: seletor e dicas */}
+          <Grid item xs={12} md={7}>
+            <Card variant="outlined" sx={{ height: "100%" }}>
+              <CardContent>
+                <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2 }}>
+                  Filtro e detalhes
+                </Typography>
+
+                {predictions.length > 0 ? (
+                  <FormControl fullWidth>
+                    <InputLabel id="player-select-label">Selecione um jogador</InputLabel>
+                    <Select
+                      labelId="player-select-label"
+                      value={selectedPlayerId}
+                      label="Selecione um jogador"
+                      onChange={(e) => setSelectedPlayerId(e.target.value)}
+                    >
+                      {predictions.map((p) => (
+                        <MenuItem key={p.identifier} value={p.identifier}>
+                          {p.identifier}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                ) : (
+                  <Typography variant="body2" color="text.secondary">
+                    Após carregar o Excel e executar a análise, você poderá selecionar um jogador aqui para ver mais detalhes.
+                  </Typography>
+                )}
+
+                {selectedPlayerDetails ? (
+                  <Alert severity="info" sx={{ mt: 2 }}>
+                    O gráfico radar depende de perfis detalhados (player_profile e cluster_average_profile).
+                    Podemos reintroduzir isso adicionando um endpoint <code>/predict/legacy</code> no backend.
+                  </Alert>
+                ) : null}
+              </CardContent>
+            </Card>
+          </Grid>
+        </Grid>
+
+        {/* Resultados abaixo das colunas, largura total */}
+        {predictions.length > 0 && (
+          <Box sx={{ mt: 4 }}>
+            <Typography variant="h6" gutterBottom>
+              Resultados das Previsões
+            </Typography>
+
+            <TableContainer component={Paper}>
+              <Table size="small" aria-label="Tabela de previsões">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Identificador</TableCell>
+                    <TableCell>Cluster Previsto</TableCell>
+                    <TableCell>Target 1 Previsto</TableCell>
+                    <TableCell>Target 2 Previsto</TableCell>
+                    <TableCell>Target 3 Previsto</TableCell>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
+                </TableHead>
+                <TableBody>
+                  {predictions.map((p) => (
+                    <TableRow key={p.identifier} hover>
+                      <TableCell>{p.identifier}</TableCell>
+                      <TableCell>{p.predicted_cluster != null ? p.predicted_cluster : "-"}</TableCell>
+                      <TableCell>{fmt(p.predicted_target1)}</TableCell>
+                      <TableCell>{fmt(p.predicted_target2)}</TableCell>
+                      <TableCell>{fmt(p.predicted_target3)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </Box>
+        )}
+      </Container>
 
-          <Typography variant="h6" gutterBottom>
-            Análise Detalhada por Jogador
-          </Typography>
-
-          <FormControl fullWidth sx={{ mb: 4 }}>
-            <InputLabel id="player-select-label">Selecione um jogador</InputLabel>
-            <Select
-              labelId="player-select-label"
-              value={selectedPlayerId}
-              label="Selecione um jogador"
-              onChange={(e) => setSelectedPlayerId(e.target.value)}
-            >
-              {predictions.map((p) => (
-                <MenuItem key={p.identifier} value={p.identifier}>
-                  {p.identifier}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-
-          {selectedPlayerDetails ? (
-            <Alert severity="info">
-              O gráfico radar depende de perfis detalhados (player_profile e cluster_average_profile).
-              Podemos reintroduzir isso adicionando um endpoint <code>/predict/legacy</code> no backend.
-            </Alert>
-          ) : null}
-        </>
-      )}
-
+      {/* Overlay mostra a etapa atual */}
       <LoadingOverlay open={isLoading} stepText={loadingStep} />
     </Box>
   );
