@@ -20,6 +20,10 @@ from sklearn.tree import DecisionTreeRegressor
 from xgboost import XGBRegressor
 import pandas.api.types as pdt
 
+# >>> NEW: imports p/ importância
+from sklearn.inspection import permutation_importance
+from typing import Dict, List, Tuple
+
 warnings.filterwarnings('ignore', category=FutureWarning)
 warnings.filterwarnings('ignore', category=UserWarning)
 
@@ -139,6 +143,44 @@ def apply_one_hot_encoding(X_train, X_test, ohe_cols):
     print(f"Features após OHE: {X_train_final.shape[1]}")
     return X_train_final, X_test_final, encoder
 
+# >>> NEW: utilitários para importância (mínimas adições)
+def _feature_base_name(col: str, ohe_bases: List[str]) -> str:
+    """Para colunas OHE como 'Cor0208_AABBCC', devolve 'Cor0208'. Para numéricas simples, devolve o próprio nome."""
+    for base in ohe_bases:
+        if col == base or col.startswith(f"{base}_"):
+            return base
+    return col
+
+def _aggregate_importances(raw_imp: Dict[str, float], ohe_bases: List[str]) -> Dict[str, float]:
+    agg: Dict[str, float] = {}
+    for col, val in raw_imp.items():
+        base = _feature_base_name(col, ohe_bases)
+        agg[base] = agg.get(base, 0.0) + float(val)
+    total = sum(agg.values())
+    if total > 0:
+        agg = {k: v/total for k, v in agg.items()}
+    return agg
+
+def _model_feature_importance(model, X_val: pd.DataFrame, y_val: pd.Series, feature_names: List[str]) -> Dict[str, float]:
+    """Tenta feature_importances_; senão, usa permutation importance (modelo-agnóstico)."""
+    if hasattr(model, "feature_importances_"):
+        imp = model.feature_importances_
+        return {f: float(w) for f, w in zip(feature_names, imp)}
+    # fallback robusto
+    try:
+        pi = permutation_importance(model, X_val, y_val, n_repeats=10, random_state=RANDOM_STATE, n_jobs=N_JOBS)
+        return {f: float(w) for f, w in zip(feature_names, pi.importances_mean)}
+    except Exception:
+        return {f: 0.0 for f in feature_names}
+
+def _topk_by_valid_range(agg_imp: Dict[str, float], valid_ranges: Dict[str, Tuple[float,float]], k: int = 5) -> List[str]:
+    ranked = sorted(agg_imp.items(), key=lambda kv: kv[1], reverse=True)
+    with_range = [f for f, _ in ranked if f in valid_ranges]
+    if len(with_range) >= k:
+        return with_range[:k]
+    rest = [f for f, _ in ranked if f not in with_range]
+    return (with_range + rest)[:k]
+
 # ===================================================================
 # SCRIPT PRINCIPAL
 # ===================================================================
@@ -242,6 +284,30 @@ for target in TARGETS:
     print(f"   - Melhor modelo no conjunto de teste: {best_model_name} (R² Teste: {best_r2_score_test:.4f})")
     best_models[target] = best_model_instance
 
+# >>> NEW: IMPORTÂNCIAS (agregadas) + TOP-5 por target
+print("\n10. Calculando importâncias por target (agregadas por feature-base)...")
+feature_importance_by_target: Dict[str, Dict[str, float]] = {}
+radar_top5_by_target: Dict[str, List[str]] = {}
+ohe_bases = ohe_cols  # nomes-base para agrupar dummies
+
+for target in TARGETS:
+    model = best_models[target]
+    selected_cols = all_selected_features[target]
+    if len(selected_cols) == 0:
+        feature_importance_by_target[target] = {}
+        radar_top5_by_target[target] = []
+        continue
+
+    X_val = X_test_final[selected_cols]
+    y_val = y_test[target]
+
+    raw_imp = _model_feature_importance(model, X_val, y_val, feature_names=list(X_val.columns))
+    agg_imp = _aggregate_importances(raw_imp, ohe_bases=ohe_bases)
+
+    feature_importance_by_target[target] = agg_imp
+    radar_top5_by_target[target] = _topk_by_valid_range(agg_imp, valid_ranges=valid_ranges, k=5)
+    print(f"   - {target}: Top5 → {radar_top5_by_target[target]}")
+
 # -- GERAÇÃO DE ARQUIVO CSV PARA FRONTEND --
 print("\n8. Gerando CSV de teste para o frontend...")
 df_front = df_raw.loc[y_test.index].copy()
@@ -284,7 +350,10 @@ column_info = {
     'ohe_cols': ohe_cols,
     'final_model_columns': X_train_final.columns.tolist(),
     'selected_features_by_target': all_selected_features,
-    'valid_ranges': valid_ranges
+    'valid_ranges': valid_ranges,
+    # >>> NEW: grava importâncias agregadas e Top-5 por target
+    'feature_importance_by_target': feature_importance_by_target,
+    'radar_top5_by_target': radar_top5_by_target
 }
 with open(ARTIFACTS_DIR / "column_info.json", "w") as f:
     json.dump(column_info, f, indent=2)

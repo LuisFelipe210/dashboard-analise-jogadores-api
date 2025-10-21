@@ -23,7 +23,7 @@ BASE_DIR = Path(__file__).resolve().parent
 ARTIFACTS_DIR = BASE_DIR / "artifacts"
 API_KEY = os.getenv("API_KEY", "fallback_key_if_not_set")
 
-app = FastAPI(title="API de Previsão de Performance de Jogadores", version="2.1.0")
+app = FastAPI(title="API de Previsão de Performance de Jogadores", version="2.2.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"],
@@ -104,6 +104,129 @@ def _extract_rows(payload: Any) -> List[Dict[str, Any]]:
     if not isinstance(rows, list) or len(rows) == 0:
         raise HTTPException(status_code=422, detail="Nenhuma linha enviada para previsão.")
     return rows
+
+# ========================= RADAR HELPERS (NOVO) =========================
+
+def _ensure_all_imputed_columns(df: pd.DataFrame) -> pd.DataFrame:
+    for col in COLUMN_INFO["all_features_imputed"]:
+        if col not in df.columns:
+            df[col] = np.nan
+    return df
+
+def _scale_0_100(val: float, rng: Tuple[float, float]) -> float:
+    lo, hi = float(rng[0]), float(rng[1])
+    if hi <= lo:
+        return 50.0
+    x = (float(val) - lo) / (hi - lo)
+    return float(max(0.0, min(1.0, x)) * 100.0)
+
+def _choose_radar_labels_for_target(target: str, k: int = 5) -> List[str]:
+    # 1) preferir os top-5 salvos pelo treino
+    top5_map = COLUMN_INFO.get("radar_top5_by_target", {})
+    chosen = list(top5_map.get(target, []))
+    if chosen:
+        return chosen[:k]
+    # 2) fallback: usar selected_features_by_target filtrando por valid_ranges
+    selected = COLUMN_INFO["selected_features_by_target"].get(target, [])
+    valid = set(COLUMN_INFO.get("valid_ranges", {}).keys())
+    filtered = [f for f in selected if f in valid]
+    if len(filtered) >= k:
+        return filtered[:k]
+    # 3) último fallback fixo (se nada acima existir)
+    fallback = ["P01", "P02", "P03", "Acordar", "QtdHorasDormi"]
+    return fallback[:k]
+
+def _impute_original_and_process_one(row: Dict[str, Any]) -> Tuple[pd.Series, pd.Series, pd.DataFrame]:
+    """
+    Retorna:
+      - orig_num_imputed: pd.Series com as features numéricas no ESPAÇO ORIGINAL (antes do scaler) imputadas
+      - orig_cat_like_num: pd.Series para categóricas que também têm faixas numéricas em valid_ranges (ex.: Likert)
+      - X_processed: DataFrame 1xN no mesmo espaço final dos modelos/cluster (pós-scaler + OHE + ordem)
+    """
+    df = pd.DataFrame([row]).replace("N/A", np.nan)
+    df = _ensure_all_imputed_columns(df)
+
+    # 1) Imputação por tipo (mesmo do pipeline)
+    df[COLUMN_INFO["numerical_features"]] = NUMERIC_IMPUTER.transform(
+        df[COLUMN_INFO["numerical_features"]]
+    )
+    df[COLUMN_INFO["categorical_features"]] = CATEGORICAL_IMPUTER.transform(
+        df[COLUMN_INFO["categorical_features"]]
+    )
+
+    # 2) Tratamento de faixa (clip + fillna com mediana do intervalo)
+    for col, (lower, upper) in COLUMN_INFO["valid_ranges"].items():
+        if col in df.columns:
+            s = pd.to_numeric(df[col], errors="coerce")
+            s = s.clip(lower=lower, upper=upper)
+            mid = (float(lower) + float(upper)) / 2.0
+            s = s.fillna(mid)
+            df[col] = s
+
+    # 3) Negativos nas numéricas -> mediana (no espaço ORIGINAL)
+    for col in COLUMN_INFO["numerical_features"]:
+        s = pd.to_numeric(df[col], errors="coerce")
+        mask = s < 0
+        if mask.any():
+            med = np.nanmedian(s[s >= 0])
+            if np.isnan(med):
+                med = 0.0
+            df.loc[mask, col] = med
+
+    # --- snapshot ORIGINAL imputado (antes do scaler) ---
+    orig_num_imputed = df[COLUMN_INFO["numerical_features"]].iloc[0].copy()
+
+    cats_with_range = [c for c in COLUMN_INFO["categorical_features"]
+                       if c in COLUMN_INFO.get("valid_ranges", {}) and c in df.columns]
+    if cats_with_range:
+        # garantir numéricas
+        orig_cat_like_num = df[cats_with_range].apply(pd.to_numeric, errors="coerce").iloc[0].copy()
+    else:
+        orig_cat_like_num = pd.Series(dtype=float)
+
+    # 4) Scaler nas numéricas (para o espaço dos modelos/cluster)
+    df[COLUMN_INFO["numerical_features"]] = SCALER.transform(
+        df[COLUMN_INFO["numerical_features"]]
+    )
+
+    # 5) OHE e ordem final (igual ao pipeline)
+    ohe_cols = COLUMN_INFO["ohe_cols"]
+    enc = ENCODER_OHE.transform(df[ohe_cols])
+    enc_df = pd.DataFrame(
+        enc,
+        columns=ENCODER_OHE.get_feature_names_out(ohe_cols),
+        index=df.index
+    )
+    df2 = pd.concat([df.drop(columns=ohe_cols), enc_df], axis=1)
+
+    final_cols = COLUMN_INFO["final_model_columns"]
+    for col in final_cols:
+        if col not in df2.columns:
+            df2[col] = 0
+    X_processed = df2[final_cols]
+
+    return orig_num_imputed, orig_cat_like_num, X_processed
+
+
+def _cluster_center_num_orig(cluster_id: int) -> Dict[str, float]:
+    """
+    Traz o centro do cluster para a escala ORIGINAL das features NUMÉRICAS.
+    Retorna {num_feature: valor_no_espaco_original}.
+    """
+    try:
+        if KMEANS_MODEL is None:
+            return {}
+        center = np.array(KMEANS_MODEL.cluster_centers_[cluster_id], dtype=float)
+
+        final_cols = COLUMN_INFO["final_model_columns"]
+        num_cols = COLUMN_INFO["numerical_features"]
+        num_idx = [final_cols.index(c) for c in num_cols]
+
+        center_num_scaled = center[num_idx].reshape(1, -1)
+        center_num_orig = SCALER.inverse_transform(center_num_scaled).flatten()
+        return {c: float(v) for c, v in zip(num_cols, center_num_orig)}
+    except Exception:
+        return {}
 
 # ===================================================================
 # PIPELINE DE PREVISÃO
@@ -303,3 +426,94 @@ def overview():
 @app.get("/clusters/profile")
 def clusters_profile():
     return {"message": "Este endpoint foi substituído pelo agrupamento por faixas via /predict e /targets/buckets."}
+
+# =========================== RADAR ENDPOINT (NOVO) ===========================
+@app.post("/radar")
+def radar_profile(
+    payload: Dict[str, Any] = Body(...),
+    target: str = "Target1",
+):
+    """
+    Monta o perfil de radar para um jogador (player) e um target específico.
+    Entrada:
+      {
+        "player": { "<col>": <valor>, ... }
+      }
+    Query param:
+      - target=Target1|Target2|Target3  (padrão Target1)
+    Saída:
+      {
+        "target": "Target1",
+        "cluster_id": 0|1|...|null,
+        "labels": [f1..f5],
+        "player_profile": [..0-100..],
+        "cluster_average_profile": [..0-100..],
+        "scale": "range_0_100",
+        "source": "radar"
+      }
+    """
+    _require_model_loaded()
+    if target not in ("Target1", "Target2", "Target3"):
+        raise HTTPException(status_code=422, detail="Parâmetro 'target' deve ser Target1, Target2 ou Target3.")
+
+    # aceita {'player': {...}} ou {'data': [ {...} ]} (usa a primeira linha)
+    if "player" in payload and isinstance(payload["player"], dict):
+        row = payload["player"]
+    elif "data" in payload and isinstance(payload["data"], list) and payload["data"]:
+        row = payload["data"][0]
+    else:
+        raise HTTPException(status_code=422, detail="Envie {'player': {...}} ou {'data': [ {...} ]}")
+
+    # 1) imputar (original) e processar (final) para cluster/pred
+    orig_num, orig_cat_like_num, Xp = _impute_original_and_process_one(row)
+
+    # 2) escolher eixos (Top-5 por target vindos do treino)
+    labels = _choose_radar_labels_for_target(target, k=5)
+
+    # 3) valores do jogador em escala ORIGINAL (numéricas + categóricas com faixa)
+    vals_player = []
+    vr = COLUMN_INFO.get("valid_ranges", {})
+    for f in labels:
+        if f in orig_num.index:
+            vals_player.append(float(orig_num[f]))
+        elif f in orig_cat_like_num.index:
+            vals_player.append(float(orig_cat_like_num[f]))
+        else:
+            vals_player.append(np.nan)
+
+    player_profile = [_scale_0_100(v, vr.get(f, (0.0, 1.0))) if not np.isnan(v) else 50.0 for f, v in zip(labels, vals_player)]
+
+    # 4) cluster id e centro aproximado (médias) no espaço ORIGINAL das numéricas
+    cluster_id = None
+    center_num_map: Dict[str, float] = {}
+    try:
+        if KMEANS_MODEL is not None:
+            cluster_id = int(KMEANS_MODEL.predict(Xp)[0])
+            center_num_map = _cluster_center_num_orig(cluster_id)
+    except Exception:
+        center_num_map = {}
+
+    # 5) cluster_average_profile alinhado aos labels (fallback: usa valor do jogador)
+    cluster_vals = []
+    for f in labels:
+        if f in center_num_map:
+            cluster_vals.append(center_num_map[f])
+        elif f in orig_cat_like_num.index:
+            # sem média categórica por cluster -> usa o próprio do jogador (até salvarmos médias por cluster)
+            cluster_vals.append(float(orig_cat_like_num[f]))
+        elif f in orig_num.index:
+            cluster_vals.append(float(orig_num[f]))
+        else:
+            cluster_vals.append(np.nan)
+
+    cluster_average_profile = [_scale_0_100(v, vr.get(f, (0.0, 1.0))) if not np.isnan(v) else 50.0 for f, v in zip(labels, cluster_vals)]
+
+    return {
+        "target": target,
+        "cluster_id": cluster_id,
+        "labels": labels,
+        "player_profile": player_profile,
+        "cluster_average_profile": cluster_average_profile,
+        "scale": "range_0_100",
+        "source": "radar",
+    }

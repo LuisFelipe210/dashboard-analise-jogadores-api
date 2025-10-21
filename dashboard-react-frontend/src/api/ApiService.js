@@ -1,7 +1,7 @@
 // src/api/ApiService.js
 import axios from "axios";
 
-const API_URL = import.meta.env.VITE_API_URL;   // ex.: http://localhost:8000
+const API_URL = import.meta.env.VITE_API_URL;   // ex.: http://127.0.0.1:8000
 
 if (!API_URL) {
   throw new Error("VITE_API_URL não configuradas no .env do frontend.");
@@ -12,7 +12,6 @@ const api = axios.create({
   baseURL: API_URL,
   timeout: 60_000,
   headers: {
-
     "Content-Type": "application/json",
   },
 });
@@ -39,12 +38,15 @@ function unwrapApiError(error) {
  * Retorna: { predictions, bucket_summary, count }
  */
 export const runPrediction = async (rows) => {
-  // ✅ sempre envie { data: rows }
-  const { data } = await axios.post(`${API_URL}/predict`, { data: rows });
-  if (!data || !data.predictions) {
-    throw new Error("Resposta inesperada da API (sem 'predictions').");
+  try {
+    const { data } = await api.post("/predict", { data: rows });
+    if (!data || !data.predictions) {
+      throw new Error("Resposta inesperada da API (sem 'predictions').");
+    }
+    return data.predictions; // { target1: [...], target2: [...], target3: [...], cluster: [...] }
+  } catch (err) {
+    throw unwrapApiError(err);
   }
-  return data.predictions; // <- { target1: [...], target2: [...], target3: [...], cluster: [...] }
 };
 
 // -----------------------------
@@ -121,6 +123,24 @@ export async function getClusterProfiles() {
   try {
     const { data } = await api.get("/clusters/profile");
     return data; // { message: ... }
+  } catch (err) {
+    throw unwrapApiError(err);
+  }
+}
+
+// -----------------------------
+// 🔥 Radar por target
+// -----------------------------
+/**
+ * player: objeto com as colunas pré-OHE (linha normalizada do Excel, sem __identifier)
+ * target: "Target1" | "Target2" | "Target3"
+ * Retorna: { target, cluster_id, labels, player_profile, cluster_average_profile, ... }
+ */
+export async function getRadar(player, target) {
+  try {
+    const { data } = await api.post("/radar", { player }, { params: { target } });
+    // data.labels deve ter 5 eixos; profiles em 0–100
+    return data;
   } catch (err) {
     throw unwrapApiError(err);
   }
