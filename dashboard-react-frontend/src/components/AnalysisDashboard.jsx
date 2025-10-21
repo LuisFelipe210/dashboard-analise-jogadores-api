@@ -2,7 +2,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   Box,
-  Grid,
   Card,
   CardContent,
   Typography,
@@ -12,11 +11,16 @@ import {
   Chip,
   Button,
   TextField,
+  Stack,
+  Divider,
 } from "@mui/material";
 import HelpOutline from "@mui/icons-material/HelpOutline";
 import Download from "@mui/icons-material/Download";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import Plot from "react-plotly.js";
+import { ScatterChart } from "@mui/x-charts/ScatterChart";
+import { BarChart } from "@mui/x-charts/BarChart";
+import { axisClasses } from "@mui/x-charts";
 
 // =========================
 // CONFIG
@@ -227,6 +231,28 @@ function AnalysisDashboard() {
     return out;
   }, [rows, thresholds]);
 
+  // Card style reused
+  const cardStyle = {
+    background: "rgba(30,41,59,0.82)",
+    backdropFilter: "blur(10px)",
+    border: "1px solid rgba(148,163,184,0.08)",
+    borderRadius: 4,
+    boxShadow: "0 2px 16px 0 rgba(30,41,59,0.22)",
+    transition: "transform 0.18s cubic-bezier(.4,0,.2,1), box-shadow 0.18s cubic-bezier(.4,0,.2,1)",
+    "&:hover": {
+      transform: "translateY(-6px) scale(1.012)",
+      boxShadow: "0 8px 32px 0 rgba(30,41,59,0.29)",
+    },
+  };
+
+  // Chart style reused
+  const chartStyle = {
+    background: "rgba(51,65,85,0.13)",
+    borderRadius: 4,
+    p: 2,
+    [`& .${axisClasses.root}`]: { stroke: "#475569", color: "#E2E8F0" },
+  };
+
   if (loading)
     return (
       <Box sx={{ display: "flex", justifyContent: "center", mt: 4 }}>
@@ -236,35 +262,107 @@ function AnalysisDashboard() {
   if (error) return <Alert severity="error">{error}</Alert>;
 
   return (
-    <Box>
-      {/* Topo: ações */}
-      <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 3 }}>
+    <Box
+      sx={{
+        background: "linear-gradient(180deg, #0F172A 0%, #1E293B 100%)",
+        color: "#E2E8F0",
+        minHeight: "100vh",
+        p: { xs: 2, md: 4 },
+        borderRadius: 2,
+      }}
+    >
+      {/* Barra de título */}
+      <Typography
+        variant="h4"
+        sx={{
+          mb: 3,
+          fontWeight: 800,
+          color: "#F8FAFC",
+          letterSpacing: 0.5,
+          textShadow: "0 2px 12px rgba(30,41,59,0.22)",
+        }}
+      >
+        Painel de Análise de Jogadores
+      </Typography>
+
+      {/* Ações rápidas */}
+      <Stack direction="row" alignItems="center" justifyContent="flex-end" spacing={2} sx={{ mb: 3 }}>
         <Button
-          variant="outlined"
+          variant="contained"
+          color="primary"
           startIcon={<Download />}
           onClick={() => downloadCSV(rows)}
-          sx={{ ml: "auto" }}
+          sx={{
+            background: "linear-gradient(90deg, #2563EB 0%, #3B82F6 100%)",
+            color: "#fff",
+            textTransform: "none",
+            fontWeight: 600,
+            borderRadius: 2,
+            px: 2.5,
+            boxShadow: "0 2px 8px 0 rgba(30,41,59,0.18)",
+            "&:hover": {
+              background: "linear-gradient(90deg, #1E40AF 0%, #2563EB 100%)",
+            },
+          }}
         >
           Baixar CSV
         </Button>
-      </Box>
+      </Stack>
 
-      {/* Cards topo */}
-      <Grid container spacing={2} sx={{ mb: 3 }}>
-        <Grid item xs={12} sm={6} md={4}>
-          <Card>
-            <CardContent>
-              <Typography variant="subtitle2">REGISTROS NO CSV</Typography>
-              <Typography variant="h4">{rows.length}</Typography>
+      {/* Seção: Métricas e Thresholds */}
+      <Stack
+        direction={{ xs: "column", md: "row" }}
+        spacing={3}
+        sx={{ mb: 4 }}
+        useFlexGap
+      >
+        {/* Cards métricas rápidas */}
+        <Stack
+          direction={{ xs: "column", md: "row" }}
+          spacing={3}
+          flex={2}
+          useFlexGap
+        >
+          <Card sx={{ ...cardStyle, minWidth: 0, flex: 1, p: { xs: 2.5, md: 4 } }}>
+            <CardContent sx={{ p: 0 }}>
+              <Typography
+                variant="subtitle2"
+                sx={{ color: "#A5B4FC", letterSpacing: 1.1, fontWeight: 700 }}
+              >
+                REGISTROS NO CSV
+              </Typography>
+              <Typography
+                variant="h4"
+                sx={{
+                  fontWeight: 800,
+                  color: "#F8FAFC",
+                  mt: 0.5,
+                  letterSpacing: 0.2,
+                  textShadow: "0 2px 8px rgba(30,41,59,0.20)",
+                }}
+              >
+                {rows.length}
+              </Typography>
             </CardContent>
           </Card>
-        </Grid>
-
-        <Grid item xs={12} sm={6} md={4}>
-          <Card>
-            <CardContent>
-              <Typography variant="subtitle2">TARGETS COM PREVISTO</Typography>
-              <Typography variant="h4">
+          <Card sx={{ ...cardStyle, minWidth: 0, flex: 1, p: { xs: 2.5, md: 4 } }}>
+            <CardContent sx={{ p: 0 }}>
+              <Typography
+                variant="subtitle2"
+                sx={{ color: "#A5B4FC", letterSpacing: 1.1, fontWeight: 700 }}
+              >
+                TARGETS COM PREVISTO
+              </Typography>
+              <Typography
+                variant="h4"
+                sx={{
+                  fontWeight: 800,
+                  color: "#F8FAFC",
+                  mt: 0.5,
+                  letterSpacing: 0.2,
+                  textShadow: "0 2px 8px rgba(30,41,59,0.20)",
+                }}
+              >
                 {
                   TARGETS.reduce(
                     (acc, t) =>
@@ -276,263 +374,505 @@ function AnalysisDashboard() {
               </Typography>
             </CardContent>
           </Card>
-        </Grid>
+        </Stack>
+        {/* Card thresholds */}
+        <Card sx={{ ...cardStyle, minWidth: 0, flex: 1, p: { xs: 2.5, md: 4 } }}>
+          <CardContent sx={{ p: 0 }}>
+            <Typography
+              variant="subtitle2"
+              sx={{ color: "#A5B4FC", letterSpacing: 1.1, fontWeight: 700 }}
+            >
+              LIMIARES ATUAIS
+            </Typography>
+            <Stack direction="row" spacing={1.5} alignItems="center" sx={{ mt: 1 }}>
+              <TextField
+                label="Baixo (%)"
+                type="number"
+                size="small"
+                value={thresholds.low}
+                onChange={(e) =>
+                  setThresholds((t) => ({ ...t, low: Number(e.target.value) }))
+                }
+                sx={{
+                  width: 90,
+                  "& .MuiInputBase-root": {
+                    borderRadius: 2,
+                    background: "rgba(255,255,255,0.07)",
+                    color: "#E2E8F0",
+                    fontWeight: 700,
+                  },
+                  "& .MuiInputLabel-root": { color: "#A5B4FC" },
+                }}
+                InputProps={{
+                  style: { color: "#E2E8F0", fontWeight: 700 },
+                }}
+                InputLabelProps={{
+                  style: { color: "#A5B4FC" },
+                }}
+              />
+              <TextField
+                label="Alto (%)"
+                type="number"
+                size="small"
+                value={thresholds.high}
+                onChange={(e) =>
+                  setThresholds((t) => ({ ...t, high: Number(e.target.value) }))
+                }
+                sx={{
+                  width: 90,
+                  "& .MuiInputBase-root": {
+                    borderRadius: 2,
+                    background: "rgba(255,255,255,0.07)",
+                    color: "#E2E8F0",
+                    fontWeight: 700,
+                  },
+                  "& .MuiInputLabel-root": { color: "#A5B4FC" },
+                }}
+                InputProps={{
+                  style: { color: "#E2E8F0", fontWeight: 700 },
+                }}
+                InputLabelProps={{
+                  style: { color: "#A5B4FC" },
+                }}
+              />
+              <Tooltip title="O gráfico de faixas será recalculado automaticamente" arrow>
+                <RefreshIcon sx={{ ml: 0.5, color: "#A5B4FC", fontSize: 22 }} />
+              </Tooltip>
+            </Stack>
+          </CardContent>
+        </Card>
+      </Stack>
 
-        {/* Limiar ajustável (impacta o agrupamento por faixas) */}
-        <Grid item xs={12} sm={12} md={4}>
-          <Card>
-            <CardContent>
-              <Typography variant="subtitle2">LIMIARES ATUAIS</Typography>
-              <Box sx={{ display: "flex", alignItems: "center", gap: 1, mt: 1 }}>
-                <TextField
-                  label="Baixo (%)"
-                  type="number"
-                  size="small"
-                  value={thresholds.low}
-                  onChange={(e) =>
-                    setThresholds((t) => ({ ...t, low: Number(e.target.value) }))
-                  }
-                  sx={{ width: 120 }}
-                />
-                <TextField
-                  label="Alto (%)"
-                  type="number"
-                  size="small"
-                  value={thresholds.high}
-                  onChange={(e) =>
-                    setThresholds((t) => ({ ...t, high: Number(e.target.value) }))
-                  }
-                  sx={{ width: 120 }}
-                />
-                <Tooltip title="O gráfico de faixas será recalculado automaticamente" arrow>
-                  <RefreshIcon sx={{ ml: 0.5, color: "text.secondary" }} />
-                </Tooltip>
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
-
-      {/* Métricas globais */}
-      <Typography variant="h6" sx={{ mb: 1 }}>
-        Métricas Globais (comparando Real vs Previsto)
-      </Typography>
-      <Grid container spacing={2} sx={{ mb: 3 }}>
-        {TARGETS.map((t) => {
-          const { rmse, r2, mae, bias, n } = globalMetrics[t] || {
-            rmse: 0,
-            r2: 0,
-            mae: 0,
-            bias: 0,
-            n: 0,
-          };
-          const b = badge(rmse, r2);
-          return (
-            <Grid item xs={12} md={4} key={t}>
-              <Card>
-                <CardContent>
-                  <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                    <Typography variant="h6">{t}</Typography>
-                    <Chip size="small" label={b.label} color={b.color} />
-                    <Typography variant="caption" sx={{ ml: "auto" }}>
+      {/* Seção: Métricas Globais */}
+      <Card sx={{ ...cardStyle, p: { xs: 2.5, md: 4 }, mb: 5 }}>
+        <Typography
+          variant="h6"
+          sx={{
+            mb: 2,
+            fontWeight: 800,
+            color: "#F1F5F9",
+            letterSpacing: 0.5,
+            textShadow: "0 2px 8px rgba(30,41,59,0.18)",
+          }}
+        >
+          Métricas Globais (comparando Real vs Previsto)
+        </Typography>
+        <Stack
+          direction={{ xs: "column", md: "row" }}
+          spacing={3}
+          divider={
+            <Divider
+              flexItem
+              orientation="vertical"
+              sx={{ borderColor: "rgba(148,163,184,0.10)" }}
+            />
+          }
+        >
+          {TARGETS.map((t) => {
+            const { rmse, r2, mae, bias, n } = globalMetrics[t] || {
+              rmse: 0,
+              r2: 0,
+              mae: 0,
+              bias: 0,
+              n: 0,
+            };
+            const b = badge(rmse, r2);
+            return (
+              <Box
+                key={t}
+                sx={{
+                  flex: 1,
+                  minWidth: 0,
+                  p: { xs: 1, md: 2 },
+                  borderRadius: 2,
+                  background: "rgba(51,65,85,0.09)",
+                  boxShadow: "0 2px 8px 0 rgba(30,41,59,0.10)",
+                  transition: "box-shadow 0.17s cubic-bezier(.4,0,.2,1)",
+                  "&:hover": {
+                    boxShadow: "0 8px 24px 0 rgba(30,41,59,0.17)",
+                  },
+                }}
+              >
+                <Stack spacing={1.2}>
+                  <Stack direction="row" alignItems="center" spacing={1}>
+                    <Typography
+                      variant="h6"
+                      sx={{
+                        fontWeight: 800,
+                        color: "#A5B4FC",
+                        letterSpacing: 0.5,
+                        textShadow: "0 2px 8px rgba(30,41,59,0.08)",
+                      }}
+                    >
+                      {t}
+                    </Typography>
+                    <Chip
+                      size="small"
+                      label={b.label}
+                      color={b.color}
+                      sx={{
+                        fontWeight: 700,
+                        letterSpacing: 0.5,
+                        fontSize: "0.93em",
+                      }}
+                    />
+                    <Typography
+                      variant="caption"
+                      sx={{ ml: "auto", color: "#CBD5E1", fontWeight: 600 }}
+                    >
                       N={n}
                     </Typography>
-                  </Box>
-
+                  </Stack>
                   <Tooltip title="Erro médio quadrático. Menor é melhor." arrow>
-                    <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, mt: 0.5 }}>
-                      <Typography>RMSE: {rmse}</Typography>
-                      <HelpOutline fontSize="small" sx={{ color: "grey.500" }} />
-                    </Box>
+                    <Stack direction="row" alignItems="center" spacing={0.5}>
+                      <Typography sx={{ color: "#F8FAFC", fontWeight: 600 }}>
+                        RMSE: {rmse}
+                      </Typography>
+                      <HelpOutline fontSize="small" sx={{ color: "#64748B" }} />
+                    </Stack>
                   </Tooltip>
                   <Tooltip title="Proporção da variação explicada. Pode ser negativa." arrow>
-                    <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-                      <Typography>R²: {r2}</Typography>
-                      <HelpOutline fontSize="small" sx={{ color: "grey.500" }} />
-                    </Box>
+                    <Stack direction="row" alignItems="center" spacing={0.5}>
+                      <Typography sx={{ color: "#F8FAFC", fontWeight: 600 }}>
+                        R²: {r2}
+                      </Typography>
+                      <HelpOutline fontSize="small" sx={{ color: "#64748B" }} />
+                    </Stack>
                   </Tooltip>
                   <Tooltip title="Erro absoluto médio. Menor é melhor." arrow>
-                    <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-                      <Typography>MAE: {mae}</Typography>
-                      <HelpOutline fontSize="small" sx={{ color: "grey.500" }} />
-                    </Box>
+                    <Stack direction="row" alignItems="center" spacing={0.5}>
+                      <Typography sx={{ color: "#F8FAFC", fontWeight: 600 }}>
+                        MAE: {mae}
+                      </Typography>
+                      <HelpOutline fontSize="small" sx={{ color: "#64748B" }} />
+                    </Stack>
                   </Tooltip>
                   <Tooltip title="Média (Previsto − Real): positivo superestima; negativo subestima." arrow>
-                    <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-                      <Typography>Viés: {bias}</Typography>
-                      <HelpOutline fontSize="small" sx={{ color: "grey.500" }} />
-                    </Box>
+                    <Stack direction="row" alignItems="center" spacing={0.5}>
+                      <Typography sx={{ color: "#F8FAFC", fontWeight: 600 }}>
+                        Viés: {bias}
+                      </Typography>
+                      <HelpOutline fontSize="small" sx={{ color: "#64748B" }} />
+                    </Stack>
                   </Tooltip>
-                </CardContent>
-              </Card>
-            </Grid>
-          );
-        })}
-      </Grid>
-
-      {/* Comparativo Real vs Previsto */}
-      <Typography variant="h6" sx={{ mb: 1 }}>
-        Comparativo Real vs Previsto
-      </Typography>
-      <Grid container spacing={2} sx={{ mb: 4 }}>
-        {TARGETS.map((t) => {
-          const realCol = t;
-          const predCol = `${t}_Previsto`;
-          const valid = rows.filter(
-            (r) => Number.isFinite(r[realCol]) && Number.isFinite(r[predCol])
-          );
-          if (valid.length === 0)
-            return (
-              <Grid item xs={12} md={4} key={t}>
-                <Alert severity="info">Sem dados comparáveis para {t}</Alert>
-              </Grid>
+                </Stack>
+              </Box>
             );
+          })}
+        </Stack>
+      </Card>
 
-          const A = valid.map((r) => Number(r[realCol]));
-          const P = valid.map((r) => Number(r[predCol]));
-          const { min, max } = axesByTarget[t];
-          const hover = A.map(
-            (a, i) =>
-              `Real (X): ${a?.toFixed?.(2) ?? a}<br>` +
-              `Previsto (Y): ${P[i]?.toFixed?.(2) ?? P[i]}<br>` +
-              `Resíduo (Y−X): ${(P[i] - a)?.toFixed?.(2)}`
-          );
-
-          return (
-            <Grid item xs={12} md={4} key={t}>
-              <Tooltip title={TT.SCATTER} arrow>
-                <Box>
-                  <Plot
-                    data={[
-                      {
-                        x: A,
-                        y: P,
-                        mode: "markers",
-                        type: "scatter",
-                        name: "Pontos (Previsto vs Real)",
-                        marker: { size: 8 },
-                        text: hover,
-                        hoverinfo: "text",
-                      },
-                      {
-                        x: [min, max],
-                        y: [min, max],
-                        mode: "lines",
-                        type: "scatter",
-                        name: "Linha Ideal (y = x)",
-                        line: { dash: "dash" },
-                      },
-                    ]}
-                    layout={{
-                      title: `<b>${t} — Comparativo</b>`,
-                      xaxis: { title: "Real", range: [min, max] },
-                      yaxis: { title: "Previsto", range: [min, max] },
-                      autosize: true,
-                      paper_bgcolor: "#29384B",
-                      plot_bgcolor: "#29384B",
-                      font: { color: "#FFFFFF" },
-                      showlegend: true,
-                      legend: { x: 0.02, y: 0.98 },
+      {/* Seção: Gráficos Comparativos */}
+      <Card sx={{ ...cardStyle, p: { xs: 2.5, md: 4 }, mb: 5 }}>
+        <Typography
+          variant="h6"
+          sx={{
+            mb: 2,
+            fontWeight: 800,
+            color: "#F1F5F9",
+            letterSpacing: 0.5,
+            textShadow: "0 2px 8px rgba(30,41,59,0.18)",
+          }}
+        >
+          Comparativo Real vs Previsto
+        </Typography>
+        <Stack
+          direction={{ xs: "column", md: "row" }}
+          spacing={3}
+          useFlexGap
+          flexWrap="wrap"
+          alignItems="stretch"
+          justifyContent="center"
+          sx={{ mb: 0 }}
+        >
+          {TARGETS.map((t) => {
+            const realCol = t;
+            const predCol = `${t}_Previsto`;
+            const valid = rows.filter(
+              (r) => Number.isFinite(r[realCol]) && Number.isFinite(r[predCol])
+            );
+            if (valid.length === 0)
+              return (
+                <Box
+                  key={t}
+                  sx={{
+                    flex: { xs: "1 1 100%", md: "1 1 45%" },
+                    minWidth: 0,
+                    mb: { xs: 2, md: 0 },
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <Alert
+                    severity="info"
+                    sx={{
+                      width: "100%",
+                      maxWidth: 520,
+                      mx: "auto",
+                      borderRadius: 3,
+                      background: "rgba(51,65,85,0.16)",
+                      color: "#F1F5F9",
+                      fontWeight: 700,
+                      border: "1px solid rgba(148,163,184,0.16)",
                     }}
-                    useResizeHandler
-                    style={{ width: "100%", height: 360 }}
-                  />
+                  >
+                    Sem dados comparáveis para {t}
+                  </Alert>
                 </Box>
-              </Tooltip>
-            </Grid>
-          );
-        })}
-      </Grid>
+              );
 
-      {/* Ruído (Resíduos) */}
-      <Typography variant="h6" sx={{ mb: 1 }}>
-        Ruído — Distribuição de Resíduos (Previsto − Real)
-      </Typography>
-      <Grid container spacing={2} sx={{ mb: 4 }}>
-        {TARGETS.map((t) => {
-          const realCol = t;
-          const predCol = `${t}_Previsto`;
-          const valid = rows.filter(
-            (r) => Number.isFinite(r[realCol]) && Number.isFinite(r[predCol])
-          );
-          const res = valid.map((r) => Number(r[predCol]) - Number(r[realCol]));
-          const bins =
-            res.length > 1
-              ? Math.max(6, Math.ceil(Math.log2(Math.max(1, res.length)) + 1))
-              : 6;
-
-          return (
-            <Grid item xs={12} md={4} key={t}>
-              <Tooltip title={TT.RESIDUALS} arrow>
-                <Box sx={{ width: "100%" }}>
-                  <Plot
-                    data={[{ x: res, type: "histogram", nbinsx: bins, name: "Resíduos" }]}
-                    layout={{
-                      title: `${t} — Resíduos (Y − X)`,
-                      xaxis: { title: "Resíduo" },
-                      yaxis: { title: "Frequência" },
-                      autosize: true,
-                      paper_bgcolor: "#29384B",
-                      plot_bgcolor: "#29384B",
-                      font: { color: "#FFFFFF" },
-                      showlegend: false,
+            const A = valid.map((r) => Number(r[realCol]));
+            const P = valid.map((r) => Number(r[predCol]));
+            const { min, max } = axesByTarget[t];
+            return (
+              <Box
+                key={t}
+                sx={{
+                  flex: { xs: "1 1 100%", md: "1 1 45%" },
+                  minWidth: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  mb: { xs: 2, md: 0 },
+                }}
+              >
+                <Tooltip title={TT.SCATTER} arrow>
+                  <Box
+                    sx={{
+                      width: "100%",
+                      maxWidth: 520,
+                      minHeight: 340,
+                      mx: "auto",
+                      background: "rgba(51,65,85,0.13)",
+                      borderRadius: 4,
+                      boxShadow: "0 2px 12px 0 rgba(30,41,59,0.14)",
+                      p: 2,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
                     }}
-                    useResizeHandler
-                    style={{ width: "100%", height: 260 }}
-                  />
-                </Box>
-              </Tooltip>
-            </Grid>
-          );
-        })}
-      </Grid>
+                  >
+                    <Plot
+                      data={[
+                        {
+                          x: A,
+                          y: P,
+                          mode: "markers",
+                          type: "scatter",
+                          name: "Previsto vs Real",
+                          marker: { color: "#3B82F6", size: 8 },
+                        },
+                        {
+                          x: [min, max],
+                          y: [min, max],
+                          mode: "lines",
+                          type: "scatter",
+                          name: "Linha Ideal (y=x)",
+                          line: { color: "red", width: 2, dash: "dot" },
+                        },
+                      ]}
+                      layout={{
+                        width: 480,
+                        height: 320,
+                        margin: { t: 30, b: 40, l: 50, r: 20 },
+                        xaxis: { title: "Real", range: [min, max] },
+                        yaxis: { title: "Previsto", range: [min, max] },
+                        plot_bgcolor: "transparent",
+                        paper_bgcolor: "transparent",
+                        font: { color: "#E2E8F0", family: "Inter, sans-serif" },
+                        legend: {
+                          orientation: "h",
+                          y: -0.18,
+                          x: 0.5,
+                          xanchor: "center",
+                          font: { color: "#E2E8F0", size: 12 },
+                        },
+                      }}
+                      config={{ displayModeBar: false }}
+                    />
+                  </Box>
+                </Tooltip>
+              </Box>
+            );
+          })}
+        </Stack>
+      </Card>
 
-      {/* Agrupamento por faixas (POR ÚLTIMO) */}
-      <Typography variant="h6" sx={{ mb: 1 }}>
-        Agrupamento por Faixas (%) — por Target (Previsto)
-      </Typography>
-      <Tooltip title={TT.BUCKETS} arrow>
-        <Box sx={{ width: "100%", mb: 4 }}>
-          <Plot
-            data={[
-              {
-                x: TARGETS,
-                y: TARGETS.map((t) => buckets[t]["<30"] ?? 0),
-                type: "bar",
-                name: "< 30%",
-                hovertemplate: "%{y} abaixo de 30%<extra></extra>",
-              },
-              {
-                x: TARGETS,
-                y: TARGETS.map((t) => buckets[t]["30-60"] ?? 0),
-                type: "bar",
-                name: "30% – 60%",
-                hovertemplate: "%{y} entre 30% e 60%<extra></extra>",
-              },
-              {
-                x: TARGETS,
-                y: TARGETS.map((t) => buckets[t][">60"] ?? 0),
-                type: "bar",
-                name: "> 60%",
-                hovertemplate: "%{y} acima de 60%<extra></extra>",
-              },
-            ]}
-            layout={{
-              barmode: "stack",
-              title: `Distribuição por Faixas (limiares: ${thresholds.low}% / ${thresholds.high}%)`,
-              xaxis: { title: "Targets" },
-              yaxis: { title: "Quantidade de pessoas" },
-              autosize: true,
-              paper_bgcolor: "#29384B",
-              plot_bgcolor: "#29384B",
-              font: { color: "#FFFFFF" },
-              legend: { orientation: "h" },
+      {/* Seção: Gráficos de Resíduos */}
+      <Card sx={{ ...cardStyle, p: { xs: 2.5, md: 4 }, mb: 5 }}>
+        <Typography
+          variant="h6"
+          sx={{
+            mb: 2,
+            fontWeight: 800,
+            color: "#F1F5F9",
+            letterSpacing: 0.5,
+            textShadow: "0 2px 8px rgba(30,41,59,0.18)",
+          }}
+        >
+          Ruído — Distribuição de Resíduos (Previsto − Real)
+        </Typography>
+        <Stack
+          direction={{ xs: "column", md: "row" }}
+          spacing={3}
+          useFlexGap
+          flexWrap="wrap"
+          alignItems="stretch"
+          justifyContent="center"
+          sx={{ mb: 0 }}
+        >
+          {TARGETS.map((t) => {
+            const realCol = t;
+            const predCol = `${t}_Previsto`;
+            const valid = rows.filter(
+              (r) => Number.isFinite(r[realCol]) && Number.isFinite(r[predCol])
+            );
+            const res = valid.map((r) => Number(r[predCol]) - Number(r[realCol]));
+            return (
+              <Box
+                key={t}
+                sx={{
+                  flex: { xs: "1 1 100%", md: "1 1 45%" },
+                  minWidth: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  mb: { xs: 2, md: 0 },
+                }}
+              >
+                <Tooltip title={TT.RESIDUALS} arrow>
+                  <Box
+                    sx={{
+                      width: "100%",
+                      maxWidth: 520,
+                      minHeight: 320,
+                      mx: "auto",
+                      background: "rgba(51,65,85,0.13)",
+                      borderRadius: 4,
+                      boxShadow: "0 2px 12px 0 rgba(30,41,59,0.14)",
+                      p: 2,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <BarChart
+                      height={240}
+                      xAxis={[
+                        {
+                          label: "Resíduo",
+                          scaleType: "band",
+                          data: res.map((_, i) => i + 1),
+                          tickLabelStyle: { fill: "#94A3B8", fontWeight: 600 },
+                        },
+                      ]}
+                      yAxis={[
+                        {
+                          label: "Frequência",
+                          tickLabelStyle: { fill: "#94A3B8", fontWeight: 600 },
+                        },
+                      ]}
+                      series={[
+                        {
+                          data: res,
+                          color: "#38BDF8",
+                          label: "Resíduos",
+                        },
+                      ]}
+                      grid={{ horizontal: true }}
+                      sx={{
+                        ...chartStyle,
+                        "& .MuiChartsAxis-root": { color: "#E2E8F0" },
+                        background: "transparent",
+                        borderRadius: 3,
+                      }}
+                    />
+                  </Box>
+                </Tooltip>
+              </Box>
+            );
+          })}
+        </Stack>
+      </Card>
+
+      {/* Seção: Agrupamento por Faixas */}
+      <Card sx={{ ...cardStyle, p: { xs: 2.5, md: 4 }, mb: 5 }}>
+        <Typography
+          variant="h6"
+          sx={{
+            mb: 2,
+            fontWeight: 800,
+            color: "#F1F5F9",
+            letterSpacing: 0.5,
+            textShadow: "0 2px 8px rgba(30,41,59,0.18)",
+          }}
+        >
+          Agrupamento por Faixas (%) — por Target (Previsto)
+        </Typography>
+        <Tooltip title={TT.BUCKETS} arrow>
+          <Box
+            sx={{
+              width: "100%",
+              maxWidth: 1080,
+              minHeight: 360,
+              mx: "auto",
+              background: "rgba(51,65,85,0.13)",
+              borderRadius: 4,
+              boxShadow: "0 2px 12px 0 rgba(30,41,59,0.14)",
+              p: 2,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
             }}
-            useResizeHandler
-            style={{ width: "100%", height: 360 }}
-          />
-        </Box>
-      </Tooltip>
+          >
+            <BarChart
+              height={320}
+              xAxis={[
+                {
+                  scaleType: "band",
+                  data: TARGETS,
+                  label: "Targets",
+                  tickLabelStyle: { fill: "#A5B4FC", fontWeight: 700 },
+                  labelStyle: { fill: "#A5B4FC", fontWeight: 700 },
+                },
+              ]}
+              yAxis={[
+                {
+                  label: "Quantidade de pessoas",
+                  tickLabelStyle: { fill: "#F8FAFC", fontWeight: 700 },
+                  labelStyle: { fill: "#F8FAFC", fontWeight: 700 },
+                },
+              ]}
+              series={[
+                {
+                  data: TARGETS.map((t) => buckets[t]["<30"] ?? 0),
+                  color: "#60A5FA",
+                  label: "<30%",
+                  stack: "stack1",
+                },
+                {
+                  data: TARGETS.map((t) => buckets[t]["30-60"] ?? 0),
+                  color: "#34D399",
+                  label: "30–60%",
+                  stack: "stack1",
+                },
+                {
+                  data: TARGETS.map((t) => buckets[t][">60"] ?? 0),
+                  color: "#FBBF24",
+                  label: ">60%",
+                  stack: "stack1",
+                },
+              ]}
+              sx={{
+                "& .MuiChartsAxis-root": { color: "#E2E8F0" },
+                background: "transparent",
+                borderRadius: 3,
+              }}
+            />
+          </Box>
+        </Tooltip>
+      </Card>
     </Box>
   );
 }
