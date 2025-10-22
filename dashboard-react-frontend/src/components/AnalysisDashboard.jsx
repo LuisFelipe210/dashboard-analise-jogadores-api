@@ -18,9 +18,7 @@ import HelpOutline from "@mui/icons-material/HelpOutline";
 import Download from "@mui/icons-material/Download";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import Plot from "react-plotly.js";
-import { ScatterChart } from "@mui/x-charts/ScatterChart";
-import { BarChart } from "@mui/x-charts/BarChart";
-import { axisClasses } from "@mui/x-charts";
+import { axisClasses, BarChart, ScatterChart } from "@mui/x-charts";
 
 // =========================
 // CONFIG

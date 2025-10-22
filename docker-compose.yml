@@ -2,35 +2,30 @@ services:
   backend:
     build:
       context: ./backend
-    container_name: backend_api
+      dockerfile: Dockerfile
     environment:
       - API_KEY=${API_KEY}
-    ports:
-      - "8000:8000"
+      - MODEL_DIR=/app/artifacts
     volumes:
-      - ./backend:/app
+      - ./backend/artifacts:/app/artifacts   # artefatos persistentes
+    ports:
+      - "8000:8000"         # opcional (útil p/ /docs)
     networks:
       - app_network
+    restart: unless-stopped
 
   frontend:
     build:
       context: ./dashboard-react-frontend
       dockerfile: Dockerfile
-    container_name: react-frontend
-    environment:
-      # Dentro da rede do Docker, use o nome do serviço (backend), não localhost
-      - VITE_API_URL=http://backend:8000
-      - VITE_API_KEY=${API_KEY} # <--- ADICIONE ESTA LINHA
-      - CHOKIDAR_USEPOLLING=true
-    ports:
-      - "5173:5173"        # Vite (não 8501)
-    volumes:
-      - ./dashboard-react-frontend:/app
-      - /app/node_modules
     depends_on:
       - backend
+    ports:
+      - "80:80"             # site em http://IP_VM/
     networks:
       - app_network
+    restart: unless-stopped
+
 networks:
   app_network:
     driver: bridge

@@ -23,7 +23,14 @@ BASE_DIR = Path(__file__).resolve().parent
 ARTIFACTS_DIR = BASE_DIR / "artifacts"
 API_KEY = os.getenv("API_KEY", "fallback_key_if_not_set")
 
-app = FastAPI(title="API de Previsão de Performance de Jogadores", version="2.2.0")
+app = FastAPI(
+    title="API de Previsão de Performance de Jogadores",
+    version="2.2.0",
+    docs_url="/docs",
+    openapi_url="/openapi.json",
+    root_path="/api",   # <— importante
+)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"],
