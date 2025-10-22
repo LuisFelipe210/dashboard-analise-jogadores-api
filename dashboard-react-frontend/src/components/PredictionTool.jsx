@@ -1,13 +1,16 @@
-// src/components/PredictionTool.jsx
 import React, { useCallback, useMemo, useState, useEffect } from "react";
 import {
+  Box,
   AppBar,
   Toolbar,
   Container,
   Grid,
-  Box,
-  Button,
+  Paper,
+  Card,
+  CardContent,
   Typography,
+  Stack,
+  Button,
   CircularProgress,
   Alert,
   Table,
@@ -48,17 +51,16 @@ function useLatch(active, delayMs = 300) {
 }
 
 const LoadingOverlay = ({ open, stepText }) => {
-  const visible = useLatch(open, 300);
+  const visible = useLatch(open, 350);
   if (!visible) return null;
-
   return (
     <Backdrop
       open
       sx={{
-        zIndex: (t) => t.zIndex.modal + 1,
-        backdropFilter: "blur(6px)",
+        zIndex: (t) => t.zIndex.modal + 2,
+        backdropFilter: "blur(8px)",
         background:
-          "radial-gradient(1200px 600px at 50% -10%, rgba(127,86,217,0.24), transparent), rgba(8,8,12,0.55)",
+          "radial-gradient(1200px 600px at 50% -10%, rgba(36,99,235,0.10), transparent), rgba(8,8,18,0.72)",
       }}
       aria-live="polite"
       aria-busy="true"
@@ -67,12 +69,11 @@ const LoadingOverlay = ({ open, stepText }) => {
         elevation={0}
         sx={{
           p: 4,
-          width: 420,
+          width: 380,
           borderRadius: 4,
-          bgcolor: "rgba(18,18,24,0.7)",
-          border: "1px solid rgba(255,255,255,0.08)",
-          boxShadow:
-            "0 10px 30px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.06)",
+          bgcolor: "rgba(18,21,30,0.85)",
+          border: "1.5px solid rgba(59,130,246,0.12)",
+          boxShadow: "0 10px 36px 0 rgba(36,99,235,0.16)",
         }}
       >
         <Box sx={{ display: "flex", justifyContent: "center", mb: 2 }}>
@@ -81,14 +82,14 @@ const LoadingOverlay = ({ open, stepText }) => {
         <Typography
           variant="h6"
           align="center"
-          sx={{ mb: 1, color: "white", fontWeight: 600 }}
+          sx={{ mb: 1, color: "#F8FAFC", fontWeight: 700, letterSpacing: 0.2 }}
         >
           Processando análise
         </Typography>
         <Typography
           variant="body2"
           align="center"
-          sx={{ color: "rgba(255,255,255,0.85)" }}
+          sx={{ color: "rgba(203,213,225,0.95)", fontWeight: 400 }}
         >
           {stepText || "Preparando..."}
         </Typography>
@@ -96,14 +97,12 @@ const LoadingOverlay = ({ open, stepText }) => {
     </Backdrop>
   );
 };
-/* ===================== Fim overlay ===================== */
 
-/* ===================== Helpers e schema ===================== */
+// Helpers e schema (NÃO MODIFICAR lógica)
 const removeAccents = (str) => {
   if (typeof str !== "string") return str;
   return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 };
-
 const normalizeName = (s) => {
   if (s == null) return s;
   let out = String(s).trim();
@@ -112,17 +111,14 @@ const normalizeName = (s) => {
     .replace(/[^a-zA-Z0-9_]/g, "");
   return out;
 };
-
 const SPECIAL_RENAMES = new Map([
   ["L0210_nao_likert", "L0210_no_likert"],
   ["Codigo_de_Acesso", "Cdigo_de_Acesso"],
 ]);
-
 const applySpecialRename = (name) => {
   const key = normalizeName(name);
   return SPECIAL_RENAMES.get(key) || key;
 };
-
 const adaptSchema = (schemaRaw) => {
   if (!Array.isArray(schemaRaw))
     throw new Error("Schema inválido: não é array.");
@@ -145,7 +141,6 @@ const adaptSchema = (schemaRaw) => {
   }
   throw new Error("Schema inválido: formato não reconhecido.");
 };
-
 const buildRowsFromSchema = (jsonData, schema) => {
   const normalizedRows = jsonData.map((orig) => {
     const norm = {};
@@ -154,11 +149,9 @@ const buildRowsFromSchema = (jsonData, schema) => {
     });
     return norm;
   });
-
   return normalizedRows.map((orig) => {
     const row = {};
     let matches = 0;
-
     for (const f of schema) {
       const fname = f.name;
       if (Object.prototype.hasOwnProperty.call(orig, fname)) {
@@ -179,7 +172,6 @@ const buildRowsFromSchema = (jsonData, schema) => {
           f.default != null ? f.default : f.type === "number" ? 0 : "";
       }
     }
-
     const idCandidates = [
       "Código de Acesso",
       "Codigo de Acesso",
@@ -211,7 +203,6 @@ const buildRowsFromSchema = (jsonData, schema) => {
       }
     }
     row.__identifier = identifier != null ? String(identifier) : "";
-
     if (matches < schema.length * 0.5) {
       // eslint-disable-next-line no-console
       console.warn(`Poucas colunas casaram: ${matches}/${schema.length}`, {
@@ -221,7 +212,6 @@ const buildRowsFromSchema = (jsonData, schema) => {
     return row;
   });
 };
-
 const fmt = (v) => {
   if (v == null) return "-";
   if (typeof v === "number" && Number.isFinite(v)) return v.toFixed(2);
@@ -285,6 +275,7 @@ async function fetchRadar(playerRow, rowsData, target) {
 
 /* ========= Componente ========= */
 function PredictionTool() {
+  // Estado e lógica originais
   const [file, setFile] = useState(null);
   const [predictions, setPredictions] = useState([]);
   const [rowsData, setRowsData] = useState([]); // <-- mantém as linhas normalizadas (para montar player)
@@ -387,14 +378,12 @@ function PredictionTool() {
       worker.terminate();
     }
   }, []);
-
   const handlePredict = useCallback(async () => {
     try {
       if (!file) {
         setError("Por favor, carregue um arquivo primeiro.");
         return;
       }
-
       setIsLoading(true);
       setError("");
       setSuccess("");
@@ -410,7 +399,6 @@ function PredictionTool() {
       if (!Array.isArray(jsonData) || jsonData.length === 0) {
         throw new Error("O arquivo está vazio ou em um formato inválido.");
       }
-
       setLoadingStep("Alinhando com schema");
       const schemaRaw = await getSchema();
       const schema = adaptSchema(schemaRaw);
@@ -419,7 +407,6 @@ function PredictionTool() {
 
       setLoadingStep("Rodando o modelo");
       const predsDict = await runPrediction(rows);
-
       setLoadingStep("Gerando resultados");
       const n = Math.max(
         predsDict.target1?.length || 0,
@@ -434,7 +421,6 @@ function PredictionTool() {
       const safeT1 = predsDict.target1 || Array(n).fill(null);
       const safeT2 = predsDict.target2 || Array(n).fill(null);
       const safeT3 = predsDict.target3 || Array(n).fill(null);
-
       const table = Array.from({ length: n }).map((_, i) => {
         const id = String(rows[i]?.__identifier || "").trim() || `lin_${i + 1}`;
         return {
@@ -445,7 +431,6 @@ function PredictionTool() {
           predicted_target3: safeT3[i] != null ? safeT3[i] : null,
         };
       });
-
       setPredictions(table);
       setSuccess(
         `Análise concluída com sucesso para ${table.length} jogadores.`
@@ -606,23 +591,71 @@ function PredictionTool() {
       {/* Header fixo */}
       <AppBar
         position="static"
-        color="transparent"
         elevation={0}
-        sx={{ borderBottom: "1px solid", borderColor: "divider" }}
+        color="transparent"
+        sx={{
+          background: "linear-gradient(90deg, #172554 0%, #2563EB 40%, #3B82F6 100%)",
+          boxShadow: "0 2px 18px 0 rgba(36,99,235,0.12)",
+          px: { xs: 1.5, md: 4 },
+        }}
       >
-        <Toolbar sx={{ gap: 2 }}>
-          <Typography variant="h6" sx={{ flexGrow: 1, fontWeight: 700 }}>
+        <Toolbar
+          disableGutters
+          sx={{
+            minHeight: 64,
+            px: { xs: 1.5, md: 0 },
+            justifyContent: "space-between",
+            alignItems: "center",
+            width: "100%",
+            maxWidth: 1800,
+            mx: "auto",
+          }}
+        >
+          <Typography
+            variant="h6"
+            sx={{
+              fontWeight: 900,
+              color: "#F8FAFC",
+              letterSpacing: 0.8,
+              textShadow: "0 2px 12px #1e293b55",
+              fontSize: { xs: "1.18rem", md: "1.32rem" },
+              flexGrow: 1,
+              userSelect: "none",
+            }}
+          >
             Calcular Targets para Novos Jogadores
           </Typography>
-
           <Button
             onClick={handlePredict}
             variant="contained"
-            color="primary"
-            disabled={!file || isLoading}
             aria-label="Realizar análise"
+            disabled={!file || isLoading}
+            sx={{
+              px: 3.2,
+              py: 1.25,
+              fontWeight: 700,
+              borderRadius: 4,
+              background: "linear-gradient(90deg, #2563EB 0%, #3B82F6 100%)",
+              color: "#F8FAFC",
+              boxShadow: "0 2px 14px 0 rgba(36, 99, 235, 0.12)",
+              fontSize: "1rem",
+              transition: "0.17s",
+              "&:hover": {
+                background: "linear-gradient(90deg, #1d4ed8 0%, #2563eb 100%)",
+                boxShadow: "0 4px 22px 0 rgba(36, 99, 235, 0.15)",
+              },
+              "&:disabled": {
+                background: "linear-gradient(90deg, #334155 0%, #64748B 100%)",
+                color: "#CBD5E1",
+                opacity: 0.8,
+              },
+            }}
           >
-            {isLoading ? <CircularProgress size={20} /> : "🚀 Realizar Análise"}
+            {isLoading ? (
+              <CircularProgress size={22} sx={{ color: "#F8FAFC" }} />
+            ) : (
+              "Realizar Análise"
+            )}
           </Button>
         </Toolbar>
       </AppBar>
@@ -668,6 +701,31 @@ function PredictionTool() {
                     component="label"
                     aria-label="Carregar Excel"
                     disabled={isLoading}
+                    sx={{
+                      px: 3.2,
+                      py: 1.3,
+                      mt: 1,
+                      width: "100%",
+                      maxWidth: 290,
+                      fontWeight: 700,
+                      fontSize: "1rem",
+                      borderRadius: 3.5,
+                      background: "linear-gradient(90deg, #2563EB 0%, #3B82F6 100%)",
+                      color: "#F8FAFC",
+                      boxShadow: "0 2px 12px 0 rgba(36,99,235,0.13)",
+                      transition: "0.15s",
+                      "&:hover": {
+                        background: "linear-gradient(90deg, #1d4ed8 0%, #2563eb 100%)",
+                        boxShadow: "0 6px 16px 0 rgba(36, 99, 235, 0.18)",
+                      },
+                      "&:disabled": {
+                        background: "linear-gradient(90deg, #334155 0%, #64748B 100%)",
+                        color: "#CBD5E1",
+                        opacity: 0.8,
+                      },
+                      alignSelf: "center",
+                      whiteSpace: "nowrap",
+                    }}
                   >
                     Carregar Excel
                     <input
@@ -678,14 +736,20 @@ function PredictionTool() {
                       disabled={isLoading}
                     />
                   </Button>
-
                   <Typography
                     variant="body2"
                     sx={{
+                      color: "#F1F5F9",
+                      opacity: 0.85,
                       whiteSpace: "nowrap",
                       overflow: "hidden",
                       textOverflow: "ellipsis",
-                      maxWidth: 280,
+                      maxWidth: 260,
+                      fontWeight: 500,
+                      fontSize: "1rem",
+                      mt: 1,
+                      textAlign: "center",
+                      width: "100%",
                     }}
                   >
                     {file ? file.name : "Nenhum arquivo selecionado"}
@@ -990,8 +1054,7 @@ function PredictionTool() {
           </Grid>
         </Grid>
       </Container>
-
-      {/* Overlay mostra a etapa atual */}
+      {/* Overlay de loading */}
       <LoadingOverlay open={isLoading} stepText={loadingStep} />
     </Box>
   );
