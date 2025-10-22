@@ -513,7 +513,7 @@ function PredictionTool() {
                 <TableContainer component={Paper} sx={{ ...cardStyle, flex: 1, minHeight: 420, maxHeight: 400, overflowY: "auto", background: "rgba(30,41,59,0.82)" }}>
                   <Table size="small" stickyHeader>
                     <TableHead>
-                      <TableRow sx={{ "& .MuiTableCell-root": { bgcolor: "rgba(15,23,42,0.9)", color: "#A5B4FC", fontWeight: 700, borderBottom: "1px solid rgba(148,163,184,0.15)" } }}>
+                      <TableRow sx={{ "& .MuiTableCell-root": { bgcolor: "rgba(15,23,42)", color: "#A5B4FC", fontWeight: 700, borderBottom: "1px solid rgba(148,163,184,0.15)" } }}>
                         <TableCell><TableSortLabel active={orderBy === "identifier"} direction={orderBy === "identifier" ? order : "asc"} onClick={() => handleSort("identifier")}>Identificador</TableSortLabel></TableCell>
                         <TableCell><TableSortLabel active={orderBy === "predicted_target1"} direction={orderBy === "predicted_target1" ? order : "asc"} onClick={() => handleSort("predicted_target1")}>Target 1 Previsto</TableSortLabel></TableCell>
                         <TableCell><TableSortLabel active={orderBy === "predicted_target2"} direction={orderBy === "predicted_target2" ? order : "asc"} onClick={() => handleSort("predicted_target2")}>Target 2 Previsto</TableSortLabel></TableCell>
