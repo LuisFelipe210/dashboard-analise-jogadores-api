@@ -140,10 +140,8 @@ const downloadCSV = (rows) => {
 };
 
 const TT = {
-  SCATTER:
-    "Cada ponto é um registro. Linha tracejada é a linha ideal (y=x).",
-  RESIDUALS:
-    "Histograma de resíduos (Previsto − Real). Ideal é centrado em 0.",
+  SCATTER: "Cada ponto é um registro. Linha tracejada é a linha ideal (y=x).",
+  RESIDUALS: "Histograma de resíduos (Previsto − Real). Ideal é centrado em 0.",
   BUCKETS:
     "Contagem de pessoas por faixa de percentuais (<30 | 30–60 | >60) em cada target, a partir dos valores PREVISTOS.",
 };
@@ -224,7 +222,9 @@ function AnalysisDashboard() {
     const out = {};
     for (const t of TARGETS) {
       const predCol = `${t}_Previsto`;
-      const preds = rows.map((r) => Number(r[predCol])).filter((v) => Number.isFinite(v));
+      const preds = rows
+        .map((r) => Number(r[predCol]))
+        .filter((v) => Number.isFinite(v));
       const predsPercent = toPercent(preds);
       out[t] = bucketize(predsPercent, thresholds.low, thresholds.high);
     }
@@ -238,7 +238,8 @@ function AnalysisDashboard() {
     border: "1px solid rgba(148,163,184,0.08)",
     borderRadius: 4,
     boxShadow: "0 2px 16px 0 rgba(30,41,59,0.22)",
-    transition: "transform 0.18s cubic-bezier(.4,0,.2,1), box-shadow 0.18s cubic-bezier(.4,0,.2,1)",
+    transition:
+      "transform 0.18s cubic-bezier(.4,0,.2,1), box-shadow 0.18s cubic-bezier(.4,0,.2,1)",
     "&:hover": {
       transform: "translateY(-6px) scale(1.012)",
       boxShadow: "0 8px 32px 0 rgba(30,41,59,0.29)",
@@ -286,7 +287,13 @@ function AnalysisDashboard() {
       </Typography>
 
       {/* Ações rápidas */}
-      <Stack direction="row" alignItems="center" justifyContent="flex-end" spacing={2} sx={{ mb: 3 }}>
+      <Stack
+        direction="row"
+        alignItems="center"
+        justifyContent="flex-end"
+        spacing={2}
+        sx={{ mb: 3 }}
+      >
         <Button
           variant="contained"
           color="primary"
@@ -323,7 +330,9 @@ function AnalysisDashboard() {
           flex={2}
           useFlexGap
         >
-          <Card sx={{ ...cardStyle, minWidth: 0, flex: 1, p: { xs: 2.5, md: 4 } }}>
+          <Card
+            sx={{ ...cardStyle, minWidth: 0, flex: 1, p: { xs: 2.5, md: 4 } }}
+          >
             <CardContent sx={{ p: 0 }}>
               <Typography
                 variant="subtitle2"
@@ -345,7 +354,9 @@ function AnalysisDashboard() {
               </Typography>
             </CardContent>
           </Card>
-          <Card sx={{ ...cardStyle, minWidth: 0, flex: 1, p: { xs: 2.5, md: 4 } }}>
+          <Card
+            sx={{ ...cardStyle, minWidth: 0, flex: 1, p: { xs: 2.5, md: 4 } }}
+          >
             <CardContent sx={{ p: 0 }}>
               <Typography
                 variant="subtitle2"
@@ -363,19 +374,18 @@ function AnalysisDashboard() {
                   textShadow: "0 2px 8px rgba(30,41,59,0.20)",
                 }}
               >
-                {
-                  TARGETS.reduce(
-                    (acc, t) =>
-                      acc +
-                      (rows.some((r) => Number.isFinite(r[`${t}_Previsto`])) ? 1 : 0),
-                    0
-                  )
-                }
+                {TARGETS.reduce(
+                  (acc, t) =>
+                    acc +
+                    (rows.some((r) => Number.isFinite(r[`${t}_Previsto`]))
+                      ? 1
+                      : 0),
+                  0
+                )}
               </Typography>
             </CardContent>
           </Card>
         </Stack>
-
       </Stack>
 
       {/* Seção: Métricas Globais */}
@@ -466,7 +476,10 @@ function AnalysisDashboard() {
                       <HelpOutline fontSize="small" sx={{ color: "#64748B" }} />
                     </Stack>
                   </Tooltip>
-                  <Tooltip title="Proporção da variação explicada. Pode ser negativa." arrow>
+                  <Tooltip
+                    title="Proporção da variação explicada. Pode ser negativa."
+                    arrow
+                  >
                     <Stack direction="row" alignItems="center" spacing={0.5}>
                       <Typography sx={{ color: "#F8FAFC", fontWeight: 600 }}>
                         R²: {r2}
@@ -482,7 +495,10 @@ function AnalysisDashboard() {
                       <HelpOutline fontSize="small" sx={{ color: "#64748B" }} />
                     </Stack>
                   </Tooltip>
-                  <Tooltip title="Média (Previsto − Real): positivo superestima; negativo subestima." arrow>
+                  <Tooltip
+                    title="Média (Previsto − Real): positivo superestima; negativo subestima."
+                    arrow
+                  >
                     <Stack direction="row" alignItems="center" spacing={0.5}>
                       <Typography sx={{ color: "#F8FAFC", fontWeight: 600 }}>
                         Viés: {bias}
@@ -561,74 +577,82 @@ function AnalysisDashboard() {
             const P = valid.map((r) => Number(r[predCol]));
             const { min, max } = axesByTarget[t];
             return (
-              <Box
-                key={t}
-                sx={{
-                  flex: { xs: "1 1 100%", md: "1 1 45%" },
-                  minWidth: 0,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  mb: { xs: 2, md: 0 },
-                }}
-              >
-                <Tooltip title={TT.SCATTER} arrow>
-                  <Box
-                    sx={{
-                      width: "100%",
-                      maxWidth: 520,
-                      minHeight: 340,
-                      mx: "auto",
-                      background: "rgba(51,65,85,0.13)",
-                      borderRadius: 4,
-                      boxShadow: "0 2px 12px 0 rgba(30,41,59,0.14)",
-                      p: 2,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                  >
-                    <Plot
-                      data={[
-                        {
-                          x: A,
-                          y: P,
-                          mode: "markers",
-                          type: "scatter",
-                          name: "Previsto vs Real",
-                          marker: { color: "#3B82F6", size: 8 },
-                        },
-                        {
-                          x: [min, max],
-                          y: [min, max],
-                          mode: "lines",
-                          type: "scatter",
-                          name: "Linha Ideal (y=x)",
-                          line: { color: "red", width: 2, dash: "dot" },
-                        },
-                      ]}
-                      layout={{
-                        width: 480,
-                        height: 320,
-                        margin: { t: 30, b: 40, l: 50, r: 20 },
-                        xaxis: { title: "Real", range: [min, max] },
-                        yaxis: { title: "Previsto", range: [min, max] },
-                        plot_bgcolor: "transparent",
-                        paper_bgcolor: "transparent",
-                        font: { color: "#E2E8F0", family: "Inter, sans-serif" },
-                        legend: {
-                          orientation: "h",
-                          y: -0.18,
-                          x: 0.5,
-                          xanchor: "center",
-                          font: { color: "#E2E8F0", size: 12 },
-                        },
+                <Box
+                  key={t}
+                  sx={{
+                    flex: { xs: "1 1 100%", md: "1 1 45%" },
+                    minWidth: 0,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    mb: { xs: 2, md: 0 },
+                  }}
+                >
+                  <Tooltip title={TT.SCATTER} arrow>
+                    <Box
+                      sx={{
+                        width: "100%",
+                        maxWidth: 520,
+                        minHeight: 340,
+                        mx: "auto",
+                        background: "rgba(51,65,85,0.13)",
+                        borderRadius: 4,
+                        boxShadow: "0 2px 12px 0 rgba(30,41,59,0.14)",
+                        p: 2,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
                       }}
-                      config={{ displayModeBar: false }}
-                    />
-                  </Box>
-                </Tooltip>
-              </Box>
+                    >
+                      <Plot
+                        data={[
+                          {
+                            x: A,
+                            y: P,
+                            mode: "markers",
+                            type: "scatter",
+                            name: t,
+                            marker: { size: 8 },
+                            hovertemplate: `${t}<br>X: %{x}<br>Y: %{y}<extra></extra>`,
+                          },
+                          {
+                            x: [min, max],
+                            y: [min, max],
+                            mode: "lines",
+                            type: "scatter",
+                            showlegend: false, // << CHANGED: não aparece na legenda
+                            line: { width: 2, dash: "dot" },
+                            hoverinfo: "skip",
+                          },
+                        ]}
+                        layout={{
+                          width: 480,
+                          height: 320,
+                          margin: { t: 30, b: 60, l: 50, r: 20 },
+                          xaxis: {
+                            title: { text: "Previsto", standoff: 10 },
+                            range: [min, max],
+                          },
+                          yaxis: {
+                            title: { text: "Real", standoff: 10 },
+                            range: [min, max],
+                          },
+                          plot_bgcolor: "transparent",
+                          paper_bgcolor: "transparent",
+                          font: { color: "#E2E8F0", family: "Inter, sans-serif" },
+                          legend: {
+                            orientation: "h",
+                            y: -0.18,
+                            x: 0.5,
+                            xanchor: "center",
+                            font: { color: "#E2E8F0", size: 12 },
+                          },
+                        }}
+                        config={{ displayModeBar: false }}
+                      />
+                    </Box>
+                  </Tooltip>
+                </Box>
             );
           })}
         </Stack>
@@ -663,7 +687,9 @@ function AnalysisDashboard() {
             const valid = rows.filter(
               (r) => Number.isFinite(r[realCol]) && Number.isFinite(r[predCol])
             );
-            const res = valid.map((r) => Number(r[predCol]) - Number(r[realCol]));
+            const res = valid.map(
+              (r) => Number(r[predCol]) - Number(r[realCol])
+            );
             return (
               <Box
                 key={t}
@@ -712,15 +738,25 @@ function AnalysisDashboard() {
                         {
                           data: res,
                           color: "#38BDF8",
-                          label: "Resíduos",
+                          label: t, // << CHANGED: mostra o nome do target na legenda
                         },
                       ]}
                       grid={{ horizontal: true }}
+                      // << NOVO: legenda no topo (com a “bolinha” do target)
+                      slotProps={{
+                        legend: {
+                          hidden: false,
+                          direction: "row",
+                          position: { vertical: "top", horizontal: "middle" },
+                        },
+                      }}
                       sx={{
                         ...chartStyle,
                         "& .MuiChartsAxis-root": { color: "#E2E8F0" },
                         background: "transparent",
                         borderRadius: 3,
+                        // (opcional) dá um respiro extra pro topo por causa da legenda
+                        "--ChartsLegend-rootOffset": "8px",
                       }}
                     />
                   </Box>
