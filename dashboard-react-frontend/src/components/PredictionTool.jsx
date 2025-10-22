@@ -17,6 +17,7 @@ import {
   TableHead,
   TableRow,
   Paper,
+  TableSortLabel,
   FormControl,
   InputLabel,
   Select,
@@ -106,7 +107,9 @@ const removeAccents = (str) => {
 const normalizeName = (s) => {
   if (s == null) return s;
   let out = String(s).trim();
-  out = removeAccents(out).replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_]/g, "");
+  out = removeAccents(out)
+    .replace(/\s+/g, "_")
+    .replace(/[^a-zA-Z0-9_]/g, "");
   return out;
 };
 
@@ -121,10 +124,16 @@ const applySpecialRename = (name) => {
 };
 
 const adaptSchema = (schemaRaw) => {
-  if (!Array.isArray(schemaRaw)) throw new Error("Schema inválido: não é array.");
+  if (!Array.isArray(schemaRaw))
+    throw new Error("Schema inválido: não é array.");
   if (schemaRaw.length === 0) return [];
   if (typeof schemaRaw[0] === "string") {
-    return schemaRaw.map((name) => ({ name, type: "number", default: 0, label: name }));
+    return schemaRaw.map((name) => ({
+      name,
+      type: "number",
+      default: 0,
+      label: name,
+    }));
   }
   if (typeof schemaRaw[0] === "object" && schemaRaw[0].name) {
     return schemaRaw.map((f) => ({
@@ -155,7 +164,8 @@ const buildRowsFromSchema = (jsonData, schema) => {
       if (Object.prototype.hasOwnProperty.call(orig, fname)) {
         const v = orig[fname];
         if (f.type === "number") {
-          if (typeof v === "number") row[fname] = Number.isFinite(v) ? v : f.default || 0;
+          if (typeof v === "number")
+            row[fname] = Number.isFinite(v) ? v : f.default || 0;
           else {
             const num = parseFloat(String(v).replace(",", "."));
             row[fname] = Number.isFinite(num) ? num : f.default || 0;
@@ -165,7 +175,8 @@ const buildRowsFromSchema = (jsonData, schema) => {
         }
         matches++;
       } else {
-        row[fname] = f.default != null ? f.default : f.type === "number" ? 0 : "";
+        row[fname] =
+          f.default != null ? f.default : f.type === "number" ? 0 : "";
       }
     }
 
@@ -182,11 +193,19 @@ const buildRowsFromSchema = (jsonData, schema) => {
     let identifier = null;
     for (const c of idCandidates) {
       const cNorm = applySpecialRename(c);
-      if (Object.prototype.hasOwnProperty.call(orig, cNorm) && orig[cNorm] != null && orig[cNorm] !== "") {
+      if (
+        Object.prototype.hasOwnProperty.call(orig, cNorm) &&
+        orig[cNorm] != null &&
+        orig[cNorm] !== ""
+      ) {
         identifier = orig[cNorm];
         break;
       }
-      if (Object.prototype.hasOwnProperty.call(orig, c) && orig[c] != null && orig[c] !== "") {
+      if (
+        Object.prototype.hasOwnProperty.call(orig, c) &&
+        orig[c] != null &&
+        orig[c] !== ""
+      ) {
         identifier = orig[c];
         break;
       }
@@ -221,7 +240,9 @@ const toPercent = (arr) => {
   return maxv <= 1 ? arr.map((v) => (Number.isFinite(v) ? v * 100 : v)) : arr;
 };
 const bucketize = (vals, low = 30, high = 60) => {
-  let lt = 0, mid = 0, gt = 0;
+  let lt = 0,
+    mid = 0,
+    gt = 0;
   for (const v of vals) {
     if (!Number.isFinite(v)) continue;
     if (v < low) lt++;
@@ -244,22 +265,23 @@ const TT = {
 /* ===================== Fim helpers ===================== */
 
 /* ========= Radar fetch ========= */
-async function fetchRadar(playerRow, target) {
+async function fetchRadar(playerRow, rowsData, target) {
   if (!playerRow) return null;
 
   const { __identifier, ...rest } = playerRow;
   const player = Object.fromEntries(
-    Object.entries(rest).filter(([k]) =>
-      k !== "predicted_cluster" &&
-      k !== "predicted_target1" &&
-      k !== "predicted_target2" &&
-      k !== "predicted_target3"
+    Object.entries(rest).filter(
+      ([k]) =>
+        k !== "predicted_cluster" &&
+        k !== "predicted_target1" &&
+        k !== "predicted_target2" &&
+        k !== "predicted_target3"
     )
   );
 
-  return getRadar(player, target);
+  // envia player + TODA a planilha normalizada para a MODA do backend
+  return getRadar({ player, context_rows: rowsData }, target);
 }
-
 
 /* ========= Componente ========= */
 function PredictionTool() {
@@ -272,6 +294,8 @@ function PredictionTool() {
   const [success, setSuccess] = useState("");
   const [selectedPlayerId, setSelectedPlayerId] = useState("");
   const [thresholds, setThresholds] = useState({ low: 30, high: 60 });
+  const [orderBy, setOrderBy] = useState("identifier");
+  const [order, setOrder] = useState("asc");
 
   // estado dos 3 radares
   const [radarLoading, setRadarLoading] = useState(false);
@@ -308,15 +332,56 @@ function PredictionTool() {
     }
   }, []);
 
+  const handleSort = (key) => {
+    if (orderBy === key) {
+      setOrder((prev) => (prev === "asc" ? "desc" : "asc"));
+    } else {
+      setOrderBy(key);
+      setOrder("asc");
+    }
+  };
+
+  const sortedPredictions = useMemo(() => {
+    const arr = [...predictions];
+    const dir = order === "asc" ? 1 : -1;
+
+    return arr.sort((a, b) => {
+      const va = a[orderBy];
+      const vb = b[orderBy];
+
+      // null/undefined sempre ao final
+      const aNull = va == null;
+      const bNull = vb == null;
+      if (aNull && bNull) return 0;
+      if (aNull) return 1;
+      if (bNull) return -1;
+
+      // se for número, compara como número
+      const na = Number(va);
+      const nb = Number(vb);
+      const aNum = Number.isFinite(na);
+      const bNum = Number.isFinite(nb);
+
+      if (aNum && bNum) return (na - nb) * dir;
+
+      // fallback string
+      return String(va).localeCompare(String(vb)) * dir;
+    });
+  }, [predictions, orderBy, order]);
+
   const readSheetInWorker = useCallback(async (excelFile) => {
-    const worker = new Worker(new URL("../workers/excelWorker.js", import.meta.url), { type: "module" });
+    const worker = new Worker(
+      new URL("../workers/excelWorker.js", import.meta.url),
+      { type: "module" }
+    );
     try {
       const buf = await excelFile.arrayBuffer();
       const result = await new Promise((resolve) => {
         worker.onmessage = (e) => resolve(e.data);
         worker.postMessage(buf);
       });
-      if (!result.success) throw new Error(result.error || "Falha ao processar planilha");
+      if (!result.success)
+        throw new Error(result.error || "Falha ao processar planilha");
       return result.data;
     } finally {
       worker.terminate();
@@ -359,12 +424,13 @@ function PredictionTool() {
       const n = Math.max(
         predsDict.target1?.length || 0,
         predsDict.target2?.length || 0,
-        predsDict.target3?.length || 0,
-        predsDict.cluster?.length || 0
+        predsDict.target3?.length || 0
       );
-      if (n === 0) throw new Error("A API retornou zero previsões. Verifique os logs e o arquivo.");
+      if (n === 0)
+        throw new Error(
+          "A API retornou zero previsões. Verifique os logs e o arquivo."
+        );
 
-      const safeCluster = predsDict.cluster || Array(n).fill(null);
       const safeT1 = predsDict.target1 || Array(n).fill(null);
       const safeT2 = predsDict.target2 || Array(n).fill(null);
       const safeT3 = predsDict.target3 || Array(n).fill(null);
@@ -374,7 +440,6 @@ function PredictionTool() {
         return {
           identifier: id,
           rowIndex: i,
-          predicted_cluster: safeCluster[i] != null ? safeCluster[i] : null,
           predicted_target1: safeT1[i] != null ? safeT1[i] : null,
           predicted_target2: safeT2[i] != null ? safeT2[i] : null,
           predicted_target3: safeT3[i] != null ? safeT3[i] : null,
@@ -382,7 +447,9 @@ function PredictionTool() {
       });
 
       setPredictions(table);
-      setSuccess(`Análise concluída com sucesso para ${table.length} jogadores.`);
+      setSuccess(
+        `Análise concluída com sucesso para ${table.length} jogadores.`
+      );
     } catch (err) {
       console.error(err);
       const msg =
@@ -422,9 +489,9 @@ function PredictionTool() {
       setRadarError("");
       try {
         const [r1, r2, r3] = await Promise.all([
-          fetchRadar(selectedPlayerRow, "Target1"),
-          fetchRadar(selectedPlayerRow, "Target2"),
-          fetchRadar(selectedPlayerRow, "Target3"),
+          fetchRadar(selectedPlayerRow, rowsData, "Target1"),
+          fetchRadar(selectedPlayerRow, rowsData, "Target2"),
+          fetchRadar(selectedPlayerRow, rowsData, "Target3"),
         ]);
         if (!cancel) {
           setRadarData({ Target1: r1, Target2: r2, Target3: r3 });
@@ -437,20 +504,43 @@ function PredictionTool() {
       }
     }
     loadRadars();
-    return () => { cancel = true; };
-  }, [selectedPlayerId, selectedPlayerRow]);
+    return () => {
+      cancel = true;
+    };
+  }, [selectedPlayerId, selectedPlayerRow, rowsData]);
 
   // Componente Radar (Plotly)
   const Radar = ({ title, data }) => {
-    if (!data) return (
-      <Card variant="outlined" sx={{ p: 2, minHeight: 320, display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <Typography variant="body2" color="text.secondary">Sem dados para {title}</Typography>
-      </Card>
-    );
+    if (!data)
+      return (
+        <Card
+          variant="outlined"
+          sx={{
+            p: 2,
+            minHeight: 320,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <Typography variant="body2" color="text.secondary">
+            Sem dados para {title}
+          </Typography>
+        </Card>
+      );
 
     const labels = data.labels || [];
     const player = data.player_profile || [];
     const cluster = data.cluster_average_profile || [];
+
+    const playerRaw = (data.player_raw_values ?? player).map((v, i) => [
+      v,
+      labels[i],
+    ]);
+    const referenceRaw = (data.reference_raw_values ?? cluster).map((v, i) => [
+      v,
+      labels[i],
+    ]);
 
     return (
       <Card variant="outlined" sx={{ p: 1.5 }}>
@@ -465,20 +555,36 @@ function PredictionTool() {
               theta: labels,
               fill: "toself",
               name: "Jogador",
-              hovertemplate: "%{theta}: %{r:.1f}/100<extra>Jogador</extra>",
+              customdata: playerRaw, // nunca vazio
+              hovertemplate:
+                "%{customdata[1]}<br>" +
+                "Likert do Jogador: %{customdata[0]}<br>" +
+                "Valor: %{r:.1f}/5" +
+                "<extra>Jogador</extra>",
             },
             {
               type: "scatterpolar",
               r: cluster,
               theta: labels,
               fill: "toself",
-              name: "Média do Cluster",
-              hovertemplate: "%{theta}: %{r:.1f}/100<extra>Cluster</extra>",
+              name: "Moda Geral",
+              customdata: referenceRaw, // nunca vazio
+              hovertemplate:
+                "%{customdata[1]}<br>" +
+                "Referência (moda): %{customdata[0]}<br>" +
+                "Valor: %{r:.1f}/5" +
+                "<extra>Moda Geral</extra>",
             },
           ]}
           layout={{
             polar: {
-              radialaxis: { visible: true, range: [0, 100] },
+              radialaxis: {
+                visible: true,
+                range: [0, 5],
+                tick0: 0,
+                dtick: 1,
+                tickfont: { color: "#000" },
+              },
             },
             margin: { l: 40, r: 40, t: 20, b: 20 },
             paper_bgcolor: "#29384B",
@@ -494,7 +600,9 @@ function PredictionTool() {
   };
 
   return (
-    <Box sx={{ minHeight: "100vh", width: "100%", bgcolor: "background.default" }}>
+    <Box
+      sx={{ minHeight: "100vh", width: "100%", bgcolor: "background.default" }}
+    >
       {/* Header fixo */}
       <AppBar
         position="static"
@@ -519,7 +627,11 @@ function PredictionTool() {
         </Toolbar>
       </AppBar>
 
-      <Container maxWidth={false} disableGutters sx={{ py: 3, px: { xs: 2, md: 4 } }}>
+      <Container
+        maxWidth={false}
+        disableGutters
+        sx={{ py: 3, px: { xs: 2, md: 4 } }}
+      >
         <Stack spacing={2} sx={{ mb: 3 }}>
           {error && <Alert severity="error">{error}</Alert>}
           {success && <Alert severity="success">{success}</Alert>}
@@ -541,8 +653,13 @@ function PredictionTool() {
                 <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
                   Fonte dos dados
                 </Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                  Carregue o arquivo Excel com os jogadores para iniciar a análise.
+                <Typography
+                  variant="body2"
+                  color="text.secondary"
+                  sx={{ mb: 2 }}
+                >
+                  Carregue o arquivo Excel com os jogadores para iniciar a
+                  análise.
                 </Typography>
 
                 <Stack direction="row" spacing={2} alignItems="center">
@@ -586,7 +703,9 @@ function PredictionTool() {
 
                 {predictions.length > 0 ? (
                   <FormControl fullWidth>
-                    <InputLabel id="player-select-label">Selecione um jogador</InputLabel>
+                    <InputLabel id="player-select-label">
+                      Selecione um jogador
+                    </InputLabel>
                     <Select
                       labelId="player-select-label"
                       value={selectedPlayerId}
@@ -602,13 +721,17 @@ function PredictionTool() {
                   </FormControl>
                 ) : (
                   <Typography variant="body2" color="text.secondary">
-                    Após carregar o Excel e executar a análise, você poderá selecionar um jogador aqui para ver mais detalhes.
+                    Após carregar o Excel e executar a análise, você poderá
+                    selecionar um jogador aqui para ver mais detalhes.
                   </Typography>
                 )}
 
                 {/* Card com as MESMAS infos mostradas na lista (mas do jogador selecionado) */}
                 {selectedPlayerDetails && (
-                  <Card variant="outlined" sx={{ mt: 2, bgcolor: "rgba(255,255,255,0.02)" }}>
+                  <Card
+                    variant="outlined"
+                    sx={{ mt: 2, bgcolor: "rgba(255,255,255,0.02)" }}
+                  >
                     <CardContent>
                       <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
                         Informações do Jogador Selecionado
@@ -616,11 +739,8 @@ function PredictionTool() {
                       <Divider sx={{ my: 1 }} />
                       <Stack spacing={0.5}>
                         <Typography variant="body2">
-                          <strong>Identificador:</strong> {selectedPlayerDetails.identifier}
-                        </Typography>
-                        <Typography variant="body2">
-                          <strong>Cluster Previsto:</strong>{" "}
-                          {selectedPlayerDetails.predicted_cluster ?? "-"}
+                          <strong>Identificador:</strong>{" "}
+                          {selectedPlayerDetails.identifier}
                         </Typography>
                         <Typography variant="body2">
                           <strong>Target 1 Previsto:</strong>{" "}
@@ -659,42 +779,125 @@ function PredictionTool() {
 
             {/* 3 Radares */}
             {selectedPlayerId && (
-              <Stack spacing={2} sx={{ mt: 3 }}>
-                <Radar title="Radar — Target1" data={radarData.Target1} />
-                <Radar title="Radar — Target2" data={radarData.Target2} />
-                <Radar title="Radar — Target3" data={radarData.Target3} />
+              <Stack
+                direction="row"
+                spacing={2}
+                sx={{ mt: 3 }}
+                useFlexGap
+                flexWrap="wrap" // permite quebrar em telas menores
+              >
+                <Box sx={{ flex: "1 1 31%", minWidth: 280 }}>
+                  <Radar title="Radar — Target1" data={radarData.Target1} />
+                </Box>
+                <Box sx={{ flex: "1 1 31%", minWidth: 280 }}>
+                  <Radar title="Radar — Target2" data={radarData.Target2} />
+                </Box>
+                <Box sx={{ flex: "1 1 31%", minWidth: 280 }}>
+                  <Radar title="Radar — Target3" data={radarData.Target3} />
+                </Box>
               </Stack>
             )}
           </Grid>
 
           {/* DIREITA: Resultados + Gráfico de Faixas */}
           <Grid item xs={12} md={5} width="49%">
-            <Box sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
+            <Box
+              sx={{ height: "100%", display: "flex", flexDirection: "column" }}
+            >
               <Typography variant="h6" sx={{ mb: 1 }}>
                 Resultados das Previsões
               </Typography>
 
               {!predictions.length && (
-                <Paper variant="outlined" sx={{ flex: 1, minHeight: 420, opacity: 0.3 }} />
+                <Paper
+                  variant="outlined"
+                  sx={{ flex: 1, minHeight: 420, opacity: 0.3 }}
+                />
               )}
 
               {!!predictions.length && (
                 <TableContainer
                   component={Paper}
-                  sx={{ flex: 1, minHeight: 420, maxHeight: 400, overflowY: "auto" }}
+                  sx={{
+                    flex: 1,
+                    minHeight: 420,
+                    maxHeight: 400,
+                    overflowY: "auto",
+                  }}
                 >
-                  <Table size="small" stickyHeader aria-label="Tabela de previsões">
+                  <Table
+                    size="small"
+                    stickyHeader
+                    aria-label="Tabela de previsões"
+                  >
                     <TableHead>
                       <TableRow>
-                        <TableCell>Identificador</TableCell>
-                        <TableCell>Cluster Previsto</TableCell>
-                        <TableCell>Target 1 Previsto</TableCell>
-                        <TableCell>Target 2 Previsto</TableCell>
-                        <TableCell>Target 3 Previsto</TableCell>
+                        <TableCell
+                          sortDirection={
+                            orderBy === "identifier" ? order : false
+                          }
+                        >
+                          <TableSortLabel
+                            active={orderBy === "identifier"}
+                            direction={orderBy === "identifier" ? order : "asc"}
+                            onClick={() => handleSort("identifier")}
+                          >
+                            Identificador
+                          </TableSortLabel>
+                        </TableCell>
+
+                        <TableCell
+                          sortDirection={
+                            orderBy === "predicted_target1" ? order : false
+                          }
+                        >
+                          <TableSortLabel
+                            active={orderBy === "predicted_target1"}
+                            direction={
+                              orderBy === "predicted_target1" ? order : "asc"
+                            }
+                            onClick={() => handleSort("predicted_target1")}
+                          >
+                            Target 1 Previsto
+                          </TableSortLabel>
+                        </TableCell>
+
+                        <TableCell
+                          sortDirection={
+                            orderBy === "predicted_target2" ? order : false
+                          }
+                        >
+                          <TableSortLabel
+                            active={orderBy === "predicted_target2"}
+                            direction={
+                              orderBy === "predicted_target2" ? order : "asc"
+                            }
+                            onClick={() => handleSort("predicted_target2")}
+                          >
+                            Target 2 Previsto
+                          </TableSortLabel>
+                        </TableCell>
+
+                        <TableCell
+                          sortDirection={
+                            orderBy === "predicted_target3" ? order : false
+                          }
+                        >
+                          <TableSortLabel
+                            active={orderBy === "predicted_target3"}
+                            direction={
+                              orderBy === "predicted_target3" ? order : "asc"
+                            }
+                            onClick={() => handleSort("predicted_target3")}
+                          >
+                            Target 3 Previsto
+                          </TableSortLabel>
+                        </TableCell>
                       </TableRow>
                     </TableHead>
+
                     <TableBody>
-                      {predictions.map((p) => (
+                      {sortedPredictions.map((p) => (
                         <TableRow
                           key={p.identifier}
                           hover
@@ -703,7 +906,6 @@ function PredictionTool() {
                           sx={{ cursor: "pointer" }}
                         >
                           <TableCell>{p.identifier}</TableCell>
-                          <TableCell>{p.predicted_cluster ?? "-"}</TableCell>
                           <TableCell>{fmt(p.predicted_target1)}</TableCell>
                           <TableCell>{fmt(p.predicted_target2)}</TableCell>
                           <TableCell>{fmt(p.predicted_target3)}</TableCell>
@@ -727,21 +929,27 @@ function PredictionTool() {
                         data={[
                           {
                             x: TARGETS.map((t) => t.label),
-                            y: TARGETS.map((t) => buckets[t.label]?.["<30"] ?? 0),
+                            y: TARGETS.map(
+                              (t) => buckets[t.label]?.["<30"] ?? 0
+                            ),
                             type: "bar",
                             name: "< 30",
                             hovertemplate: "%{y} abaixo de 30<extra></extra>",
                           },
                           {
                             x: TARGETS.map((t) => t.label),
-                            y: TARGETS.map((t) => buckets[t.label]?.["30-60"] ?? 0),
+                            y: TARGETS.map(
+                              (t) => buckets[t.label]?.["30-60"] ?? 0
+                            ),
                             type: "bar",
                             name: "30 – 60",
                             hovertemplate: "%{y} entre 30 e 60<extra></extra>",
                           },
                           {
                             x: TARGETS.map((t) => t.label),
-                            y: TARGETS.map((t) => buckets[t.label]?.[">60"] ?? 0),
+                            y: TARGETS.map(
+                              (t) => buckets[t.label]?.[">60"] ?? 0
+                            ),
                             type: "bar",
                             name: "> 60",
                             hovertemplate: "%{y} acima de 60<extra></extra>",
@@ -760,7 +968,7 @@ function PredictionTool() {
                           margin: { t: 50, r: 20, b: 50, l: 50 },
                           annotations: [
                             {
-                              text: `Limiar baixo: ${thresholds.low}% | alto: ${thresholds.high}%`,
+                              text: `Limiar baixo: ${thresholds.low} | alto: ${thresholds.high}`,
                               xref: "paper",
                               yref: "paper",
                               x: 0,
@@ -774,66 +982,6 @@ function PredictionTool() {
                         useResizeHandler
                         style={{ width: "100%", height: 360 }}
                       />
-
-                      {/* Overlay de limiares */}
-                      <Box
-                        sx={{
-                          position: "absolute",
-                          top: 0,
-                          right: 0,
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 1,
-                          p: 1.25,
-                          borderRadius: 2,
-                          bgcolor: "rgba(18,18,24,0.75)",
-                          border: "1px solid rgba(255,255,255,0.12)",
-                          backdropFilter: "blur(6px)",
-                          boxShadow: "0 8px 20px rgba(0,0,0,0.35)",
-                        }}
-                      >
-                        <Stack direction="row" alignItems="center" spacing={1}>
-                          <Chip
-                            size="small"
-                            label="Limiar"
-                            sx={{ bgcolor: "rgba(255,255,255,0.08)", color: "#fff" }}
-                          />
-                          <Tooltip title="Ajuste e o gráfico recalcula automaticamente" arrow>
-                            <RefreshIcon fontSize="small" sx={{ color: "rgba(255,255,255,0.7)" }} />
-                          </Tooltip>
-                        </Stack>
-
-                        <Stack direction="row" spacing={1}>
-                          <TextField
-                            label="Baixo"
-                            type="number"
-                            size="small"
-                            value={thresholds.low}
-                            onChange={(e) =>
-                              setThresholds((t) => ({
-                                ...t,
-                                low: Number(e.target.value),
-                              }))
-                            }
-                            inputProps={{ min: 0, max: 100 }}
-                            sx={{ width: 96 }}
-                          />
-                          <TextField
-                            label="Alto"
-                            type="number"
-                            size="small"
-                            value={thresholds.high}
-                            onChange={(e) =>
-                              setThresholds((t) => ({
-                                ...t,
-                                high: Number(e.target.value),
-                              }))
-                            }
-                            inputProps={{ min: 0, max: 100 }}
-                            sx={{ width: 96 }}
-                          />
-                        </Stack>
-                      </Box>
                     </Box>
                   </Tooltip>
                 </>

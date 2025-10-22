@@ -136,10 +136,11 @@ export async function getClusterProfiles() {
  * target: "Target1" | "Target2" | "Target3"
  * Retorna: { target, cluster_id, labels, player_profile, cluster_average_profile, ... }
  */
-export async function getRadar(player, target) {
+export async function getRadar(body, target) {
+  // body deve ser: { player, context_rows }  ← IMPORTANTE
   try {
-    const { data } = await api.post("/radar", { player }, { params: { target } });
-    // data.labels deve ter 5 eixos; profiles em 0–100
+    const { data } = await api.post("/radar", body, { params: { target } });
+    // data.labels: 5 eixos; profiles em 0–5 (Likert)
     return data;
   } catch (err) {
     throw unwrapApiError(err);

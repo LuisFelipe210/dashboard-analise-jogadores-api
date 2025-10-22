@@ -375,72 +375,7 @@ function AnalysisDashboard() {
             </CardContent>
           </Card>
         </Stack>
-        {/* Card thresholds */}
-        <Card sx={{ ...cardStyle, minWidth: 0, flex: 1, p: { xs: 2.5, md: 4 } }}>
-          <CardContent sx={{ p: 0 }}>
-            <Typography
-              variant="subtitle2"
-              sx={{ color: "#A5B4FC", letterSpacing: 1.1, fontWeight: 700 }}
-            >
-              LIMIARES ATUAIS
-            </Typography>
-            <Stack direction="row" spacing={1.5} alignItems="center" sx={{ mt: 1 }}>
-              <TextField
-                label="Baixo (%)"
-                type="number"
-                size="small"
-                value={thresholds.low}
-                onChange={(e) =>
-                  setThresholds((t) => ({ ...t, low: Number(e.target.value) }))
-                }
-                sx={{
-                  width: 90,
-                  "& .MuiInputBase-root": {
-                    borderRadius: 2,
-                    background: "rgba(255,255,255,0.07)",
-                    color: "#E2E8F0",
-                    fontWeight: 700,
-                  },
-                  "& .MuiInputLabel-root": { color: "#A5B4FC" },
-                }}
-                InputProps={{
-                  style: { color: "#E2E8F0", fontWeight: 700 },
-                }}
-                InputLabelProps={{
-                  style: { color: "#A5B4FC" },
-                }}
-              />
-              <TextField
-                label="Alto (%)"
-                type="number"
-                size="small"
-                value={thresholds.high}
-                onChange={(e) =>
-                  setThresholds((t) => ({ ...t, high: Number(e.target.value) }))
-                }
-                sx={{
-                  width: 90,
-                  "& .MuiInputBase-root": {
-                    borderRadius: 2,
-                    background: "rgba(255,255,255,0.07)",
-                    color: "#E2E8F0",
-                    fontWeight: 700,
-                  },
-                  "& .MuiInputLabel-root": { color: "#A5B4FC" },
-                }}
-                InputProps={{
-                  style: { color: "#E2E8F0", fontWeight: 700 },
-                }}
-                InputLabelProps={{
-                  style: { color: "#A5B4FC" },
-                }}
-              />
-              <Tooltip title="O gráfico de faixas será recalculado automaticamente" arrow>
-                <RefreshIcon sx={{ ml: 0.5, color: "#A5B4FC", fontSize: 22 }} />
-              </Tooltip>
-            </Stack>
-          </CardContent>
-        </Card>
+
       </Stack>
 
       {/* Seção: Métricas Globais */}

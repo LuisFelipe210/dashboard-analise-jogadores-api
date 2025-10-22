@@ -68,6 +68,49 @@ except FileNotFoundError as e:
 # HELPERS
 # ===================================================================
 
+def _coerce_number(v) -> Optional[float]:
+    if v is None:
+        return None
+    if isinstance(v, (int, float)) and np.isfinite(v):
+        return float(v)
+    try:
+        vv = float(str(v).replace(",", "."))
+        return vv if np.isfinite(vv) else None
+    except Exception:
+        return None
+
+def _clamp_to_valid_range(feat: str, val: Optional[float]) -> Optional[float]:
+    if val is None:
+        return None
+    low, high = COLUMN_INFO.get("valid_ranges", {}).get(feat, (0.0, 5.0))
+    try:
+        return float(min(max(val, float(low)), float(high)))
+    except Exception:
+        return None
+
+def _compute_modes_from_rows(rows: List[Dict[str, Any]], labels: List[str]) -> List[float]:
+    """
+    Moda por feature usando as linhas da planilha (Likert 0–5).
+    Desempate: maior valor.
+    """
+    modes = []
+    for feat in labels:
+        counts = {}
+        for row in rows or []:
+            v = _coerce_number(row.get(feat))
+            v = _clamp_to_valid_range(feat, v)
+            if v is None:
+                continue
+            counts[v] = counts.get(v, 0) + 1
+        if not counts:
+            modes.append(float("nan"))
+            continue
+        max_cnt = max(counts.values())
+        candidatos = [val for val, cnt in counts.items() if cnt == max_cnt]
+        modes.append(float(max(candidatos)))
+    return modes
+
+
 def _require_model_loaded():
     if not COLUMN_INFO or not MODELS or any(v is None for v in [NUMERIC_IMPUTER, CATEGORICAL_IMPUTER, SCALER, ENCODER_OHE]):
         raise HTTPException(status_code=500, detail="Modelo não carregado/artefatos ausentes.")
@@ -435,28 +478,19 @@ def radar_profile(
 ):
     """
     Monta o perfil de radar para um jogador (player) e um target específico.
-    Entrada:
-      {
-        "player": { "<col>": <valor>, ... }
-      }
-    Query param:
-      - target=Target1|Target2|Target3  (padrão Target1)
-    Saída:
-      {
-        "target": "Target1",
-        "cluster_id": 0|1|...|null,
-        "labels": [f1..f5],
-        "player_profile": [..0-100..],
-        "cluster_average_profile": [..0-100..],
-        "scale": "range_0_100",
-        "source": "radar"
-      }
+    Referência: MODA das features calculada da planilha enviada (context_rows),
+    com fallback para artefatos do treino (feature_modes/feature_means) e, por fim, 2.5.
+    Retorna tudo na escala 0–5.
     """
     _require_model_loaded()
-    if target not in ("Target1", "Target2", "Target3"):
-        raise HTTPException(status_code=422, detail="Parâmetro 'target' deve ser Target1, Target2 ou Target3.")
 
-    # aceita {'player': {...}} ou {'data': [ {...} ]} (usa a primeira linha)
+    if target not in ("Target1", "Target2", "Target3"):
+        raise HTTPException(
+            status_code=422,
+            detail="Parâmetro 'target' deve ser Target1, Target2 ou Target3."
+        )
+
+    # --- 1) Jogador ---
     if "player" in payload and isinstance(payload["player"], dict):
         row = payload["player"]
     elif "data" in payload and isinstance(payload["data"], list) and payload["data"]:
@@ -464,56 +498,70 @@ def radar_profile(
     else:
         raise HTTPException(status_code=422, detail="Envie {'player': {...}} ou {'data': [ {...} ]}")
 
-    # 1) imputar (original) e processar (final) para cluster/pred
-    orig_num, orig_cat_like_num, Xp = _impute_original_and_process_one(row)
+    # (opcional) linhas do Excel para calcular MODA por feature
+    context_rows = payload.get("context_rows")
+    if context_rows is not None and not isinstance(context_rows, list):
+        raise HTTPException(status_code=422, detail="'context_rows' deve ser uma lista de objetos (linhas da planilha).")
 
-    # 2) escolher eixos (Top-5 por target vindos do treino)
+    # --- 2) Imputação e processamento (para recuperar valores originais coerentes) ---
+    orig_num, orig_cat_like_num, _ = _impute_original_and_process_one(row)
+
+    # --- 3) Labels (features do radar) ---
     labels = _choose_radar_labels_for_target(target, k=5)
 
-    # 3) valores do jogador em escala ORIGINAL (numéricas + categóricas com faixa)
-    vals_player = []
-    vr = COLUMN_INFO.get("valid_ranges", {})
+    # --- 4) Valores brutos do jogador (0–5) ---
+    player_raw: List[float] = []
     for f in labels:
         if f in orig_num.index:
-            vals_player.append(float(orig_num[f]))
+            v = _coerce_number(orig_num[f])
         elif f in orig_cat_like_num.index:
-            vals_player.append(float(orig_cat_like_num[f]))
+            v = _coerce_number(orig_cat_like_num[f])
         else:
-            vals_player.append(np.nan)
+            v = None
+        v = _clamp_to_valid_range(f, v)
+        player_raw.append(float(v) if v is not None else float("nan"))
 
-    player_profile = [_scale_0_100(v, vr.get(f, (0.0, 1.0))) if not np.isnan(v) else 50.0 for f, v in zip(labels, vals_player)]
+    # O radar agora usa 0–5 diretamente
+    player_profile = player_raw[:]  # 0–5
 
-    # 4) cluster id e centro aproximado (médias) no espaço ORIGINAL das numéricas
-    cluster_id = None
-    center_num_map: Dict[str, float] = {}
-    try:
-        if KMEANS_MODEL is not None:
-            cluster_id = int(KMEANS_MODEL.predict(Xp)[0])
-            center_num_map = _cluster_center_num_orig(cluster_id)
-    except Exception:
-        center_num_map = {}
+    # --- 5) Referência por MODA da PLANILHA (fallback: artefatos -> 2.5) ---
+    if isinstance(context_rows, list) and len(context_rows) > 0:
+        reference_raw = _compute_modes_from_rows(context_rows, labels)
+    else:
+        # fallbacks antigos
+        try:
+            reference_map = {}
+            modes = COLUMN_INFO.get("feature_modes")
+            means = COLUMN_INFO.get("feature_means")
 
-    # 5) cluster_average_profile alinhado aos labels (fallback: usa valor do jogador)
-    cluster_vals = []
-    for f in labels:
-        if f in center_num_map:
-            cluster_vals.append(center_num_map[f])
-        elif f in orig_cat_like_num.index:
-            # sem média categórica por cluster -> usa o próprio do jogador (até salvarmos médias por cluster)
-            cluster_vals.append(float(orig_cat_like_num[f]))
-        elif f in orig_num.index:
-            cluster_vals.append(float(orig_num[f]))
-        else:
-            cluster_vals.append(np.nan)
+            if isinstance(modes, dict) and len(modes):
+                reference_map = modes
+            elif isinstance(means, dict) and len(means):
+                vals = [v for v in means.values() if isinstance(v, (int, float))]
+                if vals and sum(1 for v in vals if v <= 1) > 0.7 * len(vals):
+                    reference_map = {k: float(v) * 5.0 for k, v in means.items()}
+                else:
+                    reference_map = {k: float(v) for k, v in means.items()}
+            else:
+                reference_map = {f: 2.5 for f in labels}
+        except Exception:
+            reference_map = {f: 2.5 for f in labels}
 
-    cluster_average_profile = [_scale_0_100(v, vr.get(f, (0.0, 1.0))) if not np.isnan(v) else 50.0 for f, v in zip(labels, cluster_vals)]
+        reference_raw = [
+            float(reference_map.get(f)) if isinstance(reference_map.get(f), (int, float)) else float("nan")
+            for f in labels
+        ]
+
+    cluster_average_profile = reference_raw[:]  # 0–5
 
     return {
         "target": target,
-        "cluster_id": cluster_id,
+        "cluster_id": None,
         "labels": labels,
-        "player_profile": player_profile,
-        "cluster_average_profile": cluster_average_profile,
-        "scale": "range_0_100",
+        "player_profile": player_profile,          # 0–5
+        "cluster_average_profile": cluster_average_profile,  # 0–5
+        "player_raw_values": player_raw,           # hover
+        "reference_raw_values": reference_raw,     # hover
+        "scale": "range_0_5",
         "source": "radar",
     }
