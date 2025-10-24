@@ -148,7 +148,3 @@ O painel permite que você selecione jogadores individuais para visualizar detal
 ## Contribuições
 
 Contribuições são bem-vindas! Se você deseja melhorar este projeto, faça um fork, crie uma branch e submeta um pull request. Agradecemos por qualquer melhoria, sugestão ou correção.
-
-## Licença
-
-Este projeto está licenciado sob a MIT License - veja o arquivo LICENSE para mais detalhes.
